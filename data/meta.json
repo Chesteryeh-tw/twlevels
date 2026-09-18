@@ -5,9 +5,9 @@
  "listed": 1089,
  "otc": 868,
  "history": {
-  "first": "20260918",
+  "first": "20250814",
   "last": "20260918",
-  "days": 1
+  "days": 268
  },
  "marketCols": "code,name,mkt,high,low,close,chg,lot,wan,kshares,open",
  "stockCols": "date,open,high,low,close,lot,wan",
