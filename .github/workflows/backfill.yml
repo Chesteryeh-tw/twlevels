@@ -37,6 +37,11 @@ jobs:
         continue-on-error: true
         run: python backfill.py "${{ inputs.days_from }}" "${{ inputs.days_to }}"
 
+      - name: 計算技術指標（即使回補中途失敗也算）
+        if: always()
+        continue-on-error: true
+        run: python indicators.py
+
       - name: 存回倉庫（即使中途失敗也存）
         if: always()
         run: |
