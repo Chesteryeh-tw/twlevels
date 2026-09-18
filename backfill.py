@@ -134,10 +134,12 @@ def main():
         if alld:
             ks = sorted(alld)
             meta["history"] = {"first": ks[0], "last": ks[-1], "days": len(ks)}
+            # 這行以前漏掉，害 meta 裡的 tradingDays 一直停在 1
+            meta["tradingDays"] = len(days)
             json.dump(meta, open(T.META, "w", encoding="utf-8"),
                       ensure_ascii=False, indent=1)
-            print("meta.json 已更新：歷史 %s ~ %s（%d 天）"
-                  % (ks[0], ks[-1], len(ks)))
+            print("meta.json 已更新：歷史 %s ~ %s（%d 天）、交易日 %d"
+                  % (ks[0], ks[-1], len(ks), len(days)))
 
 
 if __name__ == "__main__":
