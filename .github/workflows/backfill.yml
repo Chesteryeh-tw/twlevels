@@ -1,0 +1,59 @@
+name: 回補歷史資料
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_from:
+        description: '從幾天前開始（例如 400 ≈ 一年）'
+        required: true
+        default: '400'
+      days_to:
+        description: '補到幾天前為止（0 = 補到今天）'
+        required: true
+        default: '0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-data
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: 取出倉庫
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 回補
+        id: run
+        continue-on-error: true
+        run: python backfill.py "${{ inputs.days_from }}" "${{ inputs.days_to }}"
+
+      - name: 存回倉庫（即使中途失敗也存）
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "沒有新資料。"
+          else
+            git commit -m "歷史回補 ${{ inputs.days_from }}~${{ inputs.days_to }} 天前"
+            git pull --rebase --autostash || true
+            git push
+          fi
+
+      - name: 回報結果
+        if: always()
+        run: |
+          if [ "${{ steps.run.outcome }}" != "success" ]; then
+            echo "::warning::回補程式中途失敗，已存下抓到的部分。再跑一次會自動接續。"
+          fi
