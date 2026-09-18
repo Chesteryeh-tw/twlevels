@@ -1,0 +1,2 @@
+# date,open,high,low,close,lot,wan
+20260918,23.6,23.8,23.1,23.1,315,735
