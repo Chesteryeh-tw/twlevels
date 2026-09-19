@@ -21,6 +21,7 @@ def main():
 
     start = T.target_day(now)
     picked = None
+    skipped = []          # 抓不到資料的日期，之後要記成非交易日
     for back in range(12):
         day = start - timedelta(days=back)
         if day.weekday() >= 5:
@@ -33,6 +34,7 @@ def main():
             picked = (day, rows)
             break
         print("    非交易日或尚未出檔")
+        skipped.append(day)
 
     if not picked:
         print("錯誤：連續 12 天都抓不到資料。")
@@ -60,12 +62,32 @@ def main():
 
     days = T.read_days()
     days[dstr] = T.day_counts(rows)
+
+    # 把抓不到資料的日子記成非交易日（放假、颱風假），下次就不用再試。
+    # 只記「今天以前」的：今天可能只是證交所還沒出檔，不能當成放假。
+    today = now.date()
+    learned = 0
+    for d in skipped:
+        if d.date() >= today:
+            continue
+        k = d.strftime("%Y%m%d")
+        if k not in days:
+            days[k] = 0
+            learned += 1
+    if learned:
+        print("  新學到 %d 個非交易日（放假或颱風假）" % learned)
     T.write_days(days)
 
-    meta = T.write_meta(day, rows, now, extra={"tradingDays": len(days)})
+    # tradingDays 只算真正有開盤的日子；記成 0 的是非交易日，不能算進去
+    n_trading = sum(1 for v in days.values() if isinstance(v, list))
+    n_holiday = sum(1 for v in days.values() if v == 0)
+    meta = T.write_meta(day, rows, now,
+                        extra={"tradingDays": n_trading, "nonTradingDays": n_holiday})
     h = meta["history"]
-    print("完成：資料日 %s，%d 檔；歷史涵蓋 %s ~ %s（%d 天）"
-          % (meta["date"], meta["count"], h["first"], h["last"], h["days"]))
+    print("完成：資料日 %s，%d 檔；歷史涵蓋 %s ~ %s（%d 天）；"
+          "已知交易日 %d、非交易日 %d"
+          % (meta["date"], meta["count"], h["first"], h["last"], h["days"],
+             n_trading, n_holiday))
 
 
 if __name__ == "__main__":
