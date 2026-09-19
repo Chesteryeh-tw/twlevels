@@ -32,6 +32,16 @@ jobs:
       - name: 計算技術指標
         run: python indicators.py
 
+      # 以下是籌碼面。任何一段掛掉都不該讓當天的行情更新跟著失敗，
+      # 所以都設 continue-on-error —— 隔天排程會自動補上。
+      - name: 集保股權分散（每週更新，重複跑會自動略過）
+        continue-on-error: true
+        run: python tdcc.py
+
+      - name: 三大法人與融資融券
+        continue-on-error: true
+        run: python chips.py
+
       - name: 有變動就存回倉庫
         run: |
           git config user.name  "github-actions[bot]"
