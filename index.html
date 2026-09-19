@@ -338,7 +338,7 @@ details.manual[open]{padding-bottom:16px}
           <div class="range"><input id="f-runup" inputmode="decimal" placeholder="漲"><span>／</span><input id="f-rundn" inputmode="decimal" placeholder="跌"></div></div>
         <div class="field"><label for="f-supt">上通斜率 ≤（%）</label><input id="f-supt" inputmode="decimal"></div>
         <div class="field"><label for="f-wchg">帶寬變化 ≥（開布林）</label><input id="f-wchg" inputmode="decimal"></div>
-        <div class="field"><label for="f-wmin">前10日最小帶寬 ≤</label><input id="f-wmin" inputmode="decimal"></div>
+        <div class="field"><label for="f-wmin">擠壓：前10日最小帶寬 ≤（%）</label><input id="f-wmin" inputmode="decimal" placeholder="10"></div>
         <div class="field"><label for="f-supt2">上通斜率 ≥（%）</label><input id="f-supt2" inputmode="decimal"></div>
         <div class="field"><label for="f-slot">下通斜率 ≤（%）</label><input id="f-slot" inputmode="decimal"></div>
         <div class="field"><label for="f-sort">排序依據</label>
@@ -807,7 +807,9 @@ function renderReadout(){
     '公式：振幅 A = 高－低；壓力 = 收＋0.75A；交界 = (高＋低＋2×收) ÷ 4；支撐 = 收－0.75A，'+
     '再依台股檔位取整（平手往下）。<br>'+
     '布林通道 = 20 日均線 ± 2 倍標準差；月線斜率 = MA20(今)/MA20(昨)−1；'+
-    '乖離年線 = 收盤/MA240−1；均量比 = 今日量 ÷ 前 20 日均量；'+'帶寬 = 上軌/下軌−1，帶寬變化 = 今日帶寬−昨日帶寬（正值即「開布林」）。'+
+    '乖離年線 = 收盤/MA240−1；均量比 = 今日量 ÷ 前 20 日均量；'+'帶寬 = 上軌/下軌−1，數值極低（&lt; 5% ~ 10%）代表上下軌極度壓縮、進入擠壓（Squeeze）；'+
+    '帶寬變化 = 今日帶寬−昨日帶寬，快速轉正即「張口、開布林」。開布林要配合上軌斜率向上與帶量才算數，'+
+    '而且盤後要另外確認籌碼面是不是主力在買，否則容易是假突破。'+
     '資料來源：臺灣證券交易所、證券櫃檯買賣中心公開資料。<br>'+
     '本頁只做計算與整理，不構成任何投資建議。';
 }
@@ -828,9 +830,10 @@ function indLine(code){
   if(d.runDn) bits.push('連跌 <b>'+d.runDn+'</b> 天');
   if(nn(d.vr20)) bits.push('均量比 <b>'+n2(d.vr20)+'</b>'+
     (d.vr20>3?' <span class="chip note">爆量</span>':''));
+  if(nn(d.bbW)&&d.bbW<10) bits.push('<span class="chip note">擠壓中</span>');
   if(nn(d.bbWChg)) bits.push('帶寬變化 <b>'+pc1(d.bbWChg)+'</b>'+
-    (d.bbWChg>0.5&&nn(d.bbWMin10)&&d.bbWMin10<15
-      ? ' <span class="chip '+(d.slopeUp>0?'hot':'cool')+'">開布林</span>' : ''));
+    (d.bbWChg>0.5&&nn(d.bbWMin10)&&d.bbWMin10<=10
+      ? ' <span class="chip '+(d.slopeUp>1?'hot':(d.slopeLo<-1?'cool':'note'))+'">開布林</span>' : ''));
   if(!bits.length) return '';
   return '<div class="metrics sub">'+bits.map(function(s){return '<span>'+s+'</span>';}).join('')+'</div>';
 }
@@ -952,10 +955,11 @@ var PRESETS={
       s:{lot:300,chg1:3,slope2:0,bias1:20,sort:'chgPct'}},
   p7:{note:'12大籌碼「均量比 > 3 且有大量隔日沖，當天黑K機率大幅提升」。這裡只篩得到量的部分。',
       s:{val:1,vr:3,chg1:5,sort:'vr20'}},
-  b1:{note:'教材「往上帶量開布林是個好買點」：通道由壓縮轉開口、上軌往上翹、位階翻正、而且要帶量。圖上標的「發動點」就是這裡。',
-      s:{val:1,wchg:0.5,supt2:0,bpos1:0,vr:1.5,wmin:15,sort:'bbWChg'}},
-  b2:{note:'教材「往下帶量開布林是個好空點」：通道開口但下軌往下走、位階為負、帶量下殺。',
-      s:{val:1,wchg:0.5,slot:0,bpos2:0,chg2:0,vr:1.5,wmin:15,sort:'bbWChg'}},
+  b1:{note:'日線「擠壓 → 張口」：前 10 日帶寬曾壓到 10% 以下（上下軌極度壓縮、幾乎沒波動），今天帶寬突然拉開，上軌斜率向上 &gt; 1%，股價往上突破而且帶量。圖上標的「發動點」就是這裡。' +
+        '<br><b>盤後務必補一步：</b>去查籌碼面有沒有主力（大戶、關鍵分點）買盤進駐。只有散戶在買的張口，很容易是假突破。這一段本站還抓不到，要自己到券商看盤軟體對一次。',
+      s:{val:1,wchg:0.5,supt2:1,bpos1:0,chg1:1,vr:1.5,wmin:10,sort:'bbWChg'}},
+  b2:{note:'反過來的「擠壓 → 往下張口」：前 10 日曾壓縮到 10% 以下，今天帶寬拉開但下軌往下走（斜率 &lt; −1%）、位階為負、帶量下殺。同樣要回頭確認是不是主力在倒貨。',
+      s:{val:1,wchg:0.5,slot:-1,bpos2:0,chg2:-1,vr:1.5,wmin:10,sort:'bbWChg'}},
   hot:{note:'高週轉、高振幅，純粹找今天最會動的。',
       s:{val:1,turn:10,amp:5,sort:'turn'}},
   reset:{note:'把所有條件清空，自己從頭設。',s:{}}
@@ -993,7 +997,7 @@ function applyPreset(p){
   setv('f-slot',s.slot===undefined?null:s.slot);
   document.getElementById('f-sort').value=s.sort||'val';
   document.getElementById('f-dir').value=s.dir||'desc';
-  document.getElementById('pnote').textContent=P.note;
+  document.getElementById('pnote').innerHTML=P.note;
   runScan();
 }
 
@@ -1292,14 +1296,14 @@ function indPanel(o){
   h+=indCard('布林位階', nn(o.bbPos)?n1(o.bbPos):null,'上軌10／中軌0／下軌-10',
         o.bbPos>=10?'good':(o.bbPos<=-10?'bad':''));
   h+=indCard('布林帶寬', nn(o.bbW)?n1(o.bbW)+'%':null,
-        o.bbW>20?'適合當沖':(o.bbW<5?'不適合當沖':(o.bbW<10?'有效壓縮':'—')),
-        o.bbW>20?'good':(o.bbW<5?'bad':''));
+        o.bbW<5?'極度擠壓（Squeeze）':(o.bbW<10?'擠壓中，等張口':(o.bbW>20?'適合當沖':'—')),
+        o.bbW<10?'flag':(o.bbW>20?'good':''));
   h+=indCard('帶寬變化', nn(o.bbWChg)?pc1(o.bbWChg):null,
         o.bbWChg>0?'開口（開布林）':(o.bbWChg<0?'收口':'—'),
         o.bbWChg>0?'good':(o.bbWChg<0?'bad':''));
   h+=indCard('前10日最小帶寬', nn(o.bbWMin10)?n1(o.bbWMin10)+'%':null,
-        (nn(o.bbWMin10)&&o.bbWMin10<15)?'開口前有先壓縮':'—',
-        (nn(o.bbWMin10)&&o.bbWMin10<15)?'flag':'');
+        (nn(o.bbWMin10)&&o.bbWMin10<=10)?'張口前有先擠壓':'—',
+        (nn(o.bbWMin10)&&o.bbWMin10<=10)?'flag':'');
   h+=indCard('上通斜率', nn(o.slopeUp)?pc1(o.slopeUp):null, o.slopeUp>3?'紅燈｜做空要避開':'—',
         o.slopeUp>3?'flag':'');
   h+=indCard('下通斜率', nn(o.slopeLo)?pc1(o.slopeLo):null, o.slopeLo<-3?'綠燈':'—',
