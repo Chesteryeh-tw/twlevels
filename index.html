@@ -142,6 +142,25 @@ button,input,select,textarea{font:inherit;color:inherit}
 .verdict.bull{border-left-color:var(--res);background:var(--res-bg);color:var(--res)}
 .verdict.bear{border-left-color:var(--sup);background:var(--sup-bg);color:var(--sup)}
 .verdict.flat{border-left-color:var(--mid);background:var(--mid-bg);color:var(--mid)}
+/* 多空傾向：偏多偏空各一欄，寬螢幕並排、手機自動疊成上下 */
+.biasbox{margin-top:11px;padding:10px 13px;border-radius:7px;border:1px solid var(--line);
+  background:var(--surface2);display:grid;grid-template-columns:1fr 1fr;gap:4px 22px}
+.biasbox.bull{border-color:var(--res);background:var(--res-bg)}
+.biasbox.bear{border-color:var(--sup);background:var(--sup-bg)}
+.biashead{grid-column:1/-1;font-size:13.5px;margin-bottom:4px}
+.biashead .sub{color:var(--muted);font-size:12px;font-weight:400}
+.biaswarn{grid-column:1/-1;font-size:12px;color:var(--warn);background:var(--warn-bg);border-radius:5px;padding:5px 8px;margin:-2px 0 5px;line-height:1.5}
+.novol{font-size:10px;color:var(--muted);margin-left:4px;border:1px solid var(--line);border-radius:3px;padding:0 3px}
+.biasmiss{grid-column:1/-1;font-size:11.5px;color:var(--muted);margin:-2px 0 4px}
+.biasveto{grid-column:1/-1;font-size:12px;color:var(--res);background:var(--res-bg);border-radius:5px;
+  padding:5px 8px;margin:-2px 0 5px;line-height:1.55}
+.veto{font-size:10px;margin-left:5px;border:1px solid var(--res);color:var(--res);
+  border-radius:3px;padding:0 3px;white-space:nowrap}
+.biascol .t{font-size:11px;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
+.biascol .t.up{color:var(--res)} .biascol .t.down{color:var(--sup)}
+.biascol ul{margin:0;padding-left:17px}
+.biascol li{font-size:12.5px;line-height:1.55;color:var(--text)}
+@media(max-width:640px){.biasbox{grid-template-columns:1fr}}
 .rail-act{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .notfound{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:13px 16px;
   color:var(--muted);font-size:14px}
@@ -174,7 +193,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .count{color:var(--muted);font-size:13.5px;font-family:"IBM Plex Mono",monospace}
 
 .tablewrap{overflow-x:auto;margin-top:18px;border:1px solid var(--line2);border-radius:12px;background:var(--surface)}
-table{border-collapse:collapse;width:100%;min-width:1560px;font-size:13.5px}
+table{border-collapse:collapse;width:100%;min-width:1930px;font-size:13.5px}
 th{text-align:right;font-size:11px;letter-spacing:.06em;color:var(--muted);
   font-weight:500;padding:11px 12px;border-bottom:1px solid var(--line);background:var(--surface2);white-space:nowrap}
 /* 可排序的表頭：點一下換欄位，同一欄再點一下換方向 */
@@ -193,6 +212,17 @@ td.nm{font-family:"Noto Sans TC",sans-serif;white-space:nowrap}
 td.nm em{font-style:normal;font-family:"IBM Plex Mono",monospace;color:var(--muted);margin-right:8px}
 td .r{color:var(--res)} td .m{color:var(--mid)} td .s{color:var(--sup)}
 td.na{color:var(--muted);opacity:.55}
+/* 融資維持率紅綠燈：這四色是「安全／危險」，不是漲跌 */
+.lv{font-variant-numeric:tabular-nums}
+.lv::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;
+  margin-right:5px;vertical-align:1px;background:currentColor}
+.lvg{color:var(--sup)} .lvy{color:var(--mid)} .lvo{color:var(--warn)} .lvr{color:var(--res)}
+.overall{margin:10px 0 0;padding:9px 12px;border:1px solid var(--line);border-radius:7px;
+  background:var(--surface2);font-size:13px;line-height:1.7}
+.overall b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.overall .ttl{display:block;font-size:11.5px;letter-spacing:.06em;color:var(--muted);margin-bottom:3px}
+.overall .one{display:inline-block;margin-right:18px}
+.overall .why{display:block;color:var(--muted);font-size:12px;margin-top:4px}
 
 /* ---- 走勢 ---- */
 .tbar{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-bottom:6px}
@@ -318,11 +348,14 @@ details.manual[open]{padding-bottom:16px}
         <button class="preset" data-preset="p7">隔日沖出貨警示</button>
         <button class="preset bull" data-preset="b1">往上帶量開布林</button>
         <button class="preset bear" data-preset="b2">往下帶量開布林</button>
+        <button class="preset bear" data-preset="b3">反彈放空點</button>
         <button class="preset bull" data-preset="c1">開布林＋主力確認</button>
         <button class="preset bull" data-preset="c2">投信認養股</button>
         <button class="preset bull" data-preset="c3">大戶吃貨散戶離場</button>
         <button class="preset bear" data-preset="c4">投信倒貨融資接</button>
         <button class="preset bull" data-preset="c5">軋空候選</button>
+        <button class="preset bear" data-preset="c6">融資斷頭壓力</button>
+        <button class="preset bull" data-preset="c7">下跌但融資大減</button>
         <button class="preset" data-preset="hot">高週轉高振幅</button>
         <button class="preset" data-preset="reset">清除條件</button>
       </div>
@@ -364,10 +397,13 @@ details.manual[open]{padding-bottom:16px}
         <div class="field"><label for="f-bigc">大戶週增 ≥（%）</label><input id="f-bigc" inputmode="decimal"></div>
         <div class="field"><label for="f-big">大戶持股 ≥（%）</label><input id="f-big" inputmode="decimal"></div>
         <div class="field"><label for="f-sr">券資比 ≥（%）</label><input id="f-sr" inputmode="decimal"></div>
+        <div class="field" title="紅綠燈：綠 >160 沒壓力／黃 140–160 小賠／橘 130–140 剛從追繳線拉回來、上方套牢重／紅 <130 已在追繳區。130% 就是追繳線。"><label for="f-mr">融資維持率（%）綠>160 紅&lt;130</label>
+          <div class="range"><input id="f-mr1" inputmode="decimal" placeholder="≥"><span>～</span><input id="f-mr2" inputmode="decimal" placeholder="≤"></div></div>
         <div class="field"><label for="f-mgnc">融資增減（張）</label>
           <div class="range"><input id="f-mgnc1" inputmode="decimal" placeholder="≥"><span>～</span><input id="f-mgnc2" inputmode="decimal" placeholder="≤"></div></div>
         <div class="field"><label for="f-sort">排序依據</label>
           <select id="f-sort">
+            <option value="bias">多空傾向</option>
             <option value="val">成交金額</option><option value="turn">週轉率</option>
             <option value="slope20">月線斜率</option><option value="bbPos">布林位階</option>
             <option value="bbW">布林帶寬</option><option value="biasY">乖離年線</option>
@@ -375,7 +411,7 @@ details.manual[open]{padding-bottom:16px}
             <option value="inv">投信買賣超</option><option value="invD">投信連買天數</option>
             <option value="fgn">外資買賣超</option><option value="fgnD">外資連買天數</option>
             <option value="bigChg">大戶週增減</option><option value="big">大戶持股比率</option>
-            <option value="sr">券資比</option><option value="mgnChg">融資增減</option>
+            <option value="mgnRate">融資維持率</option><option value="smallChg">散戶週增減</option><option value="holdersChg">集保戶數週增減</option><option value="sr">券資比</option><option value="mgnChg">融資增減</option>
             <option value="width">三線帶寬</option><option value="ampPct">振幅%</option>
             <option value="chgPct">漲跌幅%</option><option value="pos">收盤位置</option>
             <option value="close">股價</option>
@@ -433,6 +469,7 @@ details.manual[open]{padding-bottom:16px}
       <h2>資料怎麼來的</h2>
       <p class="sub">每個交易日下午 4 點，GitHub 的伺服器會自己去證交所和櫃買中心抓全市場盤後資料，算好存進這個網站。你不需要做任何事，打開就是最新的。</p>
       <div class="status-lines" id="status"></div>
+      <div class="overall" id="overall" hidden></div>
       <div class="filter-actions">
         <button class="btn" id="refresh2">立刻重新讀取</button>
       </div>
@@ -470,10 +507,56 @@ function n2(x){return nn(x)?x.toFixed(2):'—';}
 function n1(x){return nn(x)?x.toFixed(1):'—';}
 // 張數：小數沒有意義，四捨五入到整數，並補上正負號
 function n0(x){return nn(x)?((x>0?'+':'')+Math.round(x)):'—';}
+function n0s(x){return nn(x)?String(Math.round(x)):'—';}
 function pc(x){return nn(x)?(x>0?'+':'')+x.toFixed(2)+'%':'—';}
 function pc1(x){return nn(x)?(x>0?'+':'')+x.toFixed(1)+'%':'—';}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+/* 融資維持率紅綠燈 —— 130% 是追繳線，166.7% 是剛融資買進的起點（成數 60%）。
+   距警戒 ＝ 維持率 − 130，看「還有幾個百分點才被追繳」比看維持率本身直覺。 */
+var MR_CALL = 130;
+function mrLv(v){ return v<130?'lvr':(v<140?'lvo':(v<160?'lvy':'lvg')); }
+function mrName(v){ return v<130?'紅燈':(v<140?'橘燈':(v<160?'黃燈':'綠燈')); }
+function mrGap(v){ return nn(v)?((v-MR_CALL>0?'+':'')+Math.round(v-MR_CALL)):'—'; }
+function mrTip(v){
+  if(!nn(v)) return '';
+  return mrName(v)+'　維持率 '+n0s(v)+'%　距警戒 '+mrGap(v)+
+    '（維持率 − 130% 追繳線）\n' +
+    (v<130 ? '已跌破追繳線，券商開始追繳，賣壓隨時滾出來。'
+     : v<140 ? '剛從追繳線上方一點點，上面還套著大量融資，反彈容易被解套賣壓壓回去。'
+     : v<160 ? '融資戶小賠，還撐得住，但不算乾淨。'
+     : '融資戶還在賺或小虧，沒有追繳壓力。');
+}
+function mrHTML(v){
+  if(!nn(v)) return '—';
+  return '<span class="lv '+mrLv(v)+'">'+n0s(v)+'%</span>';
+}
+/* 整體維持率：全市場（含上市／上櫃）總現值 ÷ 總融資金額。
+   單一檔可能失真，但把全市場加總起來，是很穩的市場情緒溫度計。 */
+var MR_MULT={'1':0.6,'2':0.5};
+var _mrCache=null, _mrKey='';
+function overallMR(){
+  var key=(state.chipMeta&&state.chipMeta.date||'')+'|'+state.rows.length;
+  if(_mrCache && _mrKey===key) return _mrCache;
+  var acc={all:[0,0,0],'1':[0,0,0],'2':[0,0,0]};
+  for(var i=0;i<state.rows.length;i++){
+    var r=state.rows[i], k=state.chip[r.code];
+    if(!k||!nn(k.mgn)||k.mgn<=0||!nn(k.mgnCost)||k.mgnCost<=0||!nn(r.c)) continue;
+    var mult=MR_MULT[r.mkt]; if(!mult) continue;
+    var sharesK=k.mgn*1000;
+    var mv=sharesK*r.c, loan=sharesK*k.mgnCost*mult;
+    acc.all[0]+=mv; acc.all[1]+=loan; acc.all[2]++;
+    acc[r.mkt][0]+=mv; acc[r.mkt][1]+=loan; acc[r.mkt][2]++;
+  }
+  var out={};
+  ['all','1','2'].forEach(function(key){
+    var a=acc[key];
+    out[key]= a[1]>0 ? {rate:a[0]/a[1]*100, n:a[2], mv:a[0], loan:a[1]} : null;
+  });
+  _mrCache=out; _mrKey=key;
+  return out;
+}
 
 /* ==================== 走勢分析核心（與 trend.js 同一份） ==================== */
 function mean(a){ if(!a.length) return null; var s=0; for(var i=0;i<a.length;i++) s+=a[i]; return s/a.length; }
@@ -680,7 +763,8 @@ function parsePayload(txt){
       chg:p[6]===''?null:parseFloat(p[6]),
       vol:p[7]===''?null:parseFloat(p[7]),
       val:p[8]===''?null:parseFloat(p[8]),
-      sh:(p.length>9&&p[9]!=='')?parseFloat(p[9]):null});
+      sh:(p.length>9&&p[9]!=='')?parseFloat(p[9]):null,
+      o:(p.length>10&&p[10]!=='')?parseFloat(p[10]):null});
   }
   if(!rows.length) throw new Error('讀不到任何股票。');
   return {meta:{date:hp[1]||'',fetched:hp[2]||'',count:rows.length}, rows:rows};
@@ -718,14 +802,16 @@ function parseChips(txt){
   var map={};
   for(i=i+1;i<lines.length;i++){
     var p=lines[i].split(',');
-    if(p.length<14) continue;
+    if(p.length<19) continue;
     map[p[0]]={fgn:num0(p[1]), fgnD:num0(p[2])||0,
                inv:num0(p[3]), invD:num0(p[4])||0,
                dlrH:num0(p[5]),
                mgn:num0(p[6]), mgnChg:num0(p[7]),
                shrt:num0(p[8]), sr:num0(p[9]),
                big:num0(p[10]), bigChg:num0(p[11]),
-               small:num0(p[12]), holders:num0(p[13])};
+               small:num0(p[12]), smallChg:num0(p[13]),
+               holders:num0(p[14]), holdersChg:num0(p[15]),
+               mgnRate:num0(p[16]), mgnCost:num0(p[17]), mgnConf:num0(p[18])};
   }
   return {meta:{date:hp[1]||'',fetched:hp[2]||''}, map:map};
 }
@@ -868,6 +954,7 @@ function renderReadout(){
     '<span>資料日 <b>'+prettyDate(state.meta.date)+'</b></span>'+
     '<span>上市 <b>'+a+'</b>　上櫃 <b>'+b+'</b></span>'+
     '<span>更新 <b>'+prettyFetched(state.meta.fetched)+'</b></span>'+
+    mrHeadHTML()+
     freshBadge(state.meta.date);
   document.getElementById('foot').innerHTML =
     '這組點位適用於 <b>'+prettyDate(state.meta.date)+' 的下一個交易日</b>。'+
@@ -877,8 +964,18 @@ function renderReadout(){
     '乖離年線 = 收盤/MA240−1；均量比 = 今日量 ÷ 前 20 日均量；'+'帶寬 = 上軌/下軌−1，數值極低（&lt; 5% ~ 10%）代表上下軌極度壓縮、進入擠壓（Squeeze）；'+
     '帶寬變化 = 今日帶寬−昨日帶寬，快速轉正即「張口、開布林」。開布林要配合上軌斜率向上與帶量才算數，'+
     '而且盤後要另外確認籌碼面是不是主力在買，否則容易是假突破。<br>'+
+    '<b>上軌與下軌在多頭、空頭時看的不是同一條線。</b>多頭看上軌：上軌翹是進場條件，離開上軌的黑K是短線賣點；'+
+    '空頭看下軌：下軌斜率 &lt; −3% 是講義的做空綠燈，離開下軌的紅K是短線回補點。'+
+    '反過來那一側的軌道則是「避開條件」而不是反向訊號 —— 做空要避開上軌斜率 &gt; 3% 與月線斜率 &gt; 1% 的強勢股（嘎空太恐怖），'+
+    '做多要避開下軌斜率 &lt; −3% 與月線斜率 &lt; −1% 的弱勢股（只能短多）。'+
+    '進場點也不對稱：講義寫「做多找翹上軌；做空找位階高」，空單要等月線下彎的股票反彈到中軌之上才進。<br>'+
     '籌碼：三大法人買賣超與融資融券為每個交易日更新，單位是張；'+
     '大戶＝持股千張以上、散戶＝持股百張以下，佔集保庫存的比率，集保每週五更新一次，所以大戶Δ 是「週」變化。<br>'+
+    '融資維持率 = 現價 ÷（估計平均成本 × 融資成數）× 100，成數上市 60%、上櫃 50%；剛融資買進是 166.7%，'+
+    '跌到 130% 就是追繳線。<b>距警戒 = 維持率 − 130</b>，看還剩幾個百分點被追繳比看維持率本身直覺。'+
+    '顏色是紅綠燈不是漲跌：綠 &gt;160／黃 140–160／橘 130–140／紅 &lt;130。'+
+    '標頭與「資料」分頁的<b>整體維持率</b>是把全市場的總現值除以總融資金額，當市場情緒的溫度計。'+
+    '證交所只公佈融資張數不公佈金額，所以平均成本是用 300 天的融資餘額增減配股價反推的估計值。<br>'+
     '<b>拿不到的：券商分點主力買賣超。</b>證交所只在有驗證碼的 BSR 頁面提供當日資料，沒有免費的歷史介面，'+
     '所以本站的「主力」是用投信與千張大戶代替 —— 方向對，但看不到分點細節。<br>'+
     '資料來源：臺灣證券交易所、證券櫃檯買賣中心、臺灣集中保管結算所公開資料。<br>'+
@@ -923,6 +1020,10 @@ function chipLine(code){
   if(nn(k.dlrH)) bits.push('自營避險 <b class="'+(k.dlrH>0?'r':'s')+'">'+n0(k.dlrH)+'</b> 張');
   if(nn(k.mgn)) bits.push('融資 <b>'+Math.round(k.mgn)+'</b> 張'+
     (nn(k.mgnChg)?(' <span class="'+(k.mgnChg>0?'r':'s')+'">'+n0(k.mgnChg)+'</span>'):''));
+  if(nn(k.mgnRate)) bits.push('<span title="'+esc(mrTip(k.mgnRate))+'">融資維持率 '+
+    '<b class="lv '+mrLv(k.mgnRate)+'">'+n0s(k.mgnRate)+'%</b>'+
+    ' <span class="chip '+(k.mgnRate<140?'note':(k.mgnRate<160?'':'cool'))+'">距警戒 '+mrGap(k.mgnRate)+'</span>'+
+    (nn(k.mgnCost)?('（估計成本 '+n2(k.mgnCost)+'）'):'')+'</span>');
   if(nn(k.sr)) bits.push('券資比 <b>'+n1(k.sr)+'%</b>'+
     (k.sr>20?' <span class="chip note">空單多</span>':''));
   if(nn(k.big)) bits.push('大戶(千張↑) <b>'+n1(k.big)+'%</b>'+
@@ -979,6 +1080,7 @@ function railHTML(r,o,isExample){
       '<span>漲跌停 <b>'+n2(o.up)+'</b> / <b>'+n2(o.down)+'</b></span></div>'+
     indLine(r.code)+
     chipLine(r.code)+
+    biasBlock(r,o)+
     '<div class="verdict '+vcls+'">'+vtxt+'</div>'+
     (isExample?'':'<div class="rail-act"><button class="btn xs" data-trend="'+esc(r.code)+'">看走勢圖</button></div>')+
     '</div>';
@@ -1036,7 +1138,7 @@ var F=['f-val','f-lot','f-turn','f-amp','f-chg1','f-chg2','f-pos1','f-pos2','f-p
        'f-slope1','f-slope2','f-bpos1','f-bpos2','f-bw1','f-bw2','f-bias1','f-bias2',
        'f-vr','f-runup','f-rundn','f-supt','f-wchg','f-wmin','f-supt2','f-slot',
        'f-invd','f-inv','f-invs','f-fgn','f-fgnd','f-bigc','f-big','f-sr',
-       'f-mgnc1','f-mgnc2'];
+       'f-mgnc1','f-mgnc2','f-mr1','f-mr2'];
 
 var PRESETS={
   p1:{note:'多方策略2＋做多結論：月線上升、站上月線、位階翻正、量能放大。Phase 3 接上投信連買後會更準。',
@@ -1045,19 +1147,21 @@ var PRESETS={
       s:{val:1,slope1:0,chg2:0,bpos1:-6,bpos2:4,sort:'val'}},
   p3:{note:'多方策略5「敲開連續多日跌停」：連跌 3 天以上、成交金額夠大、今天量能明顯放大。',
       s:{val:1,rundn:3,vr:1.5,sort:'vr20'}},
-  p4:{note:'空方策略3「高檔出貨紅K隔日空」：乖離年線 > 40%、前一日紅K ≥ 3%、月線已下彎。技術面兩個硬條件都到齊。',
-      s:{val:1,lot:1000,bias1:40,chg1:3,slope2:0,sort:'biasY'}},
+  p4:{note:'空方策略3「高檔出貨紅K隔日空」：乖離年線 > 40%、前一日紅K ≥ 3%、月線已下彎，'+
+        '並套上講義做空實務的避開條件「上通斜率 ≤ 3%」—— 上軌還在往外開的強勢股不能空。技術面兩個硬條件都到齊。',
+      s:{val:1,lot:1000,bias1:40,chg1:3,slope2:0,supt:3,sort:'biasY'}},
   p5:{note:'空方結論「找主投賣、月線下彎放空」：月線下彎、跌破月線、位階為負，且避開上通斜率 > 3% 的強勢股。',
       s:{val:1,slope2:-1,bpos2:0,chg2:0,supt:3,sort:'slope20',dir:'asc'}},
-  p6:{note:'空方策略2「價籌背離空」的技術面半套：量 > 300 張、漲幅 > 3%、月線下彎、已有乖離。籌碼那一半拿不到，命中率會比原版差。',
-      s:{lot:300,chg1:3,slope2:0,bias1:20,sort:'chgPct'}},
+  p6:{note:'空方策略2「價籌背離空」的技術面半套：量 > 300 張、漲幅 > 3%、月線下彎、已有乖離，'+
+        '並套上做空的避開條件「上通斜率 ≤ 3%」。籌碼那一半拿不到，命中率會比原版差。',
+      s:{lot:300,chg1:3,slope2:0,bias1:20,supt:3,sort:'chgPct'}},
   p7:{note:'12大籌碼「均量比 > 3 且有大量隔日沖，當天黑K機率大幅提升」。這裡只篩得到量的部分。',
       s:{val:1,vr:3,chg1:5,sort:'vr20'}},
-  b1:{note:'日線「擠壓 → 張口」：前 10 日帶寬曾壓到 10% 以下（上下軌極度壓縮、幾乎沒波動），今天帶寬突然拉開，上軌斜率向上 &gt; 1%，股價往上突破而且帶量。圖上標的「發動點」就是這裡。' +
+  b1:{note:'日線「擠壓 → 張口」：前 10 日帶寬曾壓到 10% 以下（上下軌極度壓縮、幾乎沒波動），今天帶寬突然拉開，上軌斜率向上 &gt; 1%，股價往上突破，<b>而且要帶量</b>（均量比 ≥ 1.5）—— 講義原文是「往上<b>帶量</b>開布林是個好買點」，沒量的張口不算真發動。' +
         '<br><b>盤後務必補一步：</b>去查籌碼面有沒有主力（大戶、關鍵分點）買盤進駐。只有散戶在買的張口，很容易是假突破。這一段本站還抓不到，要自己到券商看盤軟體對一次。',
       s:{val:1,wchg:0.5,supt2:1,bpos1:0,chg1:1,vr:1.5,wmin:10,sort:'bbWChg'}},
-  b2:{note:'反過來的「擠壓 → 往下張口」：前 10 日曾壓縮到 10% 以下，今天帶寬拉開但下軌往下走（斜率 &lt; −1%）、位階為負、帶量下殺。同樣要回頭確認是不是主力在倒貨。',
-      s:{val:1,wchg:0.5,slot:-1,bpos2:0,chg2:-1,vr:1.5,wmin:10,sort:'bbWChg'}},
+  b2:{note:'反過來的「擠壓 → 往下張口」：前 10 日曾壓縮到 10% 以下，今天帶寬拉開但下軌往下走（斜率 &lt; −1%）、位階為負，<b>而且要帶量</b>下殺 —— 講義原文「往下<b>帶量</b>開布林是個好空點」。同樣要回頭確認是不是主力在倒貨。',
+      s:{val:1,wchg:0.5,slot:-1,bpos2:0,chg2:-1,vr:1.5,wmin:10,supt:3,sort:'bbWChg'}},
   c1:{note:'<b>開布林＋主力確認</b>：b1 的「擠壓 → 張口」條件，再加上投信連買 2 天以上、大戶持股比率當週增加。'+
         '這就是你說的那道關卡 —— 張口如果只有散戶在買，很容易是假突破；有投信與千張大戶同時進場，才算有人撐。'+
         '<br>注意：分點主力還是拿不到，這裡用的是投信與大戶，方向對但沒有分點細。',
@@ -1070,6 +1174,22 @@ var PRESETS={
       s:{val:1,invs:100,mgnc1:0,slope2:0.5,sort:'inv',dir:'asc'}},
   c5:{note:'<b>軋空候選</b>：券資比偏高（融券相對融資多）、月線上升、帶量上漲。空單壓力越大，軋上去的力道越強。',
       s:{val:1,sr:20,slope1:0,chg1:1,vr:1.5,sort:'sr'}},
+  c6:{note:'<b>融資斷頭壓力</b>：融資維持率已跌破 130% 追繳線、月線下彎、融資餘額還在高檔。'+
+        '融資戶大面積套牢，券商追繳一旦開始，賣壓會自己滾出來。'+
+        '<br>反過來看也成立：斷頭洗乾淨常常就是低點，所以這張單子是「看戲」用的，不是照著做空的清單。'+
+        '<br>注意：平均成本是用 300 天融資餘額增減反推的估計值（證交所只公佈張數不公佈金額）。',
+      s:{val:1,mr2:130,slope2:0,sort:'mgnRate',dir:'asc'}},
+  c7:{note:'<b>下跌但融資大減（籌碼乾淨）</b>：融資維持率 ≥ 160%（綠燈）、今天收黑、融資餘額反而減少。'+
+        '「股價下跌而融資大減，才是真的在換手」—— 跌的時候融資自己跑掉，代表浮額被洗掉，'+
+        '後面反彈上方沒有一堆套牢融資等著解套。'+
+        '<br>反過來要避開的是「紅燈剛拉回來」的股票（維持率 130～140%，橘燈），上方還套著大量融資。'+
+        '<br>注意：這是市場通則不是講義原文，而且維持率的平均成本是估計值。',
+      s:{val:1,mr1:160,chg2:0,mgnc2:-100,sort:'mgnChg',dir:'asc'}},
+  b3:{note:'<b>反彈放空點（做空找位階高）</b>：月線下彎、股價卻反彈到中軌之上（位階 &gt; 0）、'+
+        '而且上軌斜率沒有超過 3%。<br>講義做空是「找位階高」，不是追殺已經躺在下軌的低點 —— '+
+        '空單要等弱勢股反彈到通道上緣才進，停損才抓得住。<br>'+
+        '上軌斜率 ≤ 3% 這個條件是講義做空實務原文的避開條件：上軌還在往外開的股票不能空，強勢股嘎空太恐怖。',
+      s:{val:1,slope2:0,bpos1:0,supt:3,sort:'bbPos'}},
   hot:{note:'高週轉、高振幅，純粹找今天最會動的。',
       s:{val:1,turn:10,amp:5,sort:'turn'}},
   reset:{note:'把所有條件清空，自己從頭設。',s:{}}
@@ -1115,6 +1235,8 @@ function applyPreset(p){
   setv('f-sr',  s.sr===undefined?null:s.sr);
   setv('f-mgnc1',s.mgnc1===undefined?null:s.mgnc1);
   setv('f-mgnc2',s.mgnc2===undefined?null:s.mgnc2);
+  setv('f-mr1',s.mr1===undefined?null:s.mr1);
+  setv('f-mr2',s.mr2===undefined?null:s.mr2);
   document.getElementById('f-sort').value=s.sort||'val';
   document.getElementById('f-dir').value=s.dir||'desc';
   document.getElementById('pnote').innerHTML=P.note;
@@ -1123,8 +1245,188 @@ function applyPreset(p){
 
 // 排序：哪些 key 要去哪個物件拿值。表頭點擊和「排序依據」下拉用的是同一套。
 var INDKEYS={slope20:1,bbPos:1,bbW:1,biasY:1,vr20:1,bbWChg:1,slopeUp:1,slopeLo:1,bbWMin10:1,vrY:1};
-var CHIPKEYS={inv:1,invD:1,fgn:1,fgnD:1,big:1,bigChg:1,sr:1,mgnChg:1,dlrH:1,mgn:1,shrt:1,small:1,holders:1};
+var CHIPKEYS={mgnRate:1,mgnCost:1,inv:1,invD:1,fgn:1,fgnD:1,big:1,bigChg:1,sr:1,mgnChg:1,dlrH:1,mgn:1,shrt:1,small:1,smallChg:1,holders:1,holdersChg:1};
+/* ==================== 多空傾向 ====================
+   規則全部照《權證小哥 7 小時多空實戰新手班》講義原文，不是我自己配的。
+   主要依據四段：
+     擬定多方進場策略 ——「主力買，投信買，上軌翹，月線升」
+     波段空單的獲利要素 ——「月線下彎／主力賣超／散戶買進／集保戶數大增／地緣分點大賣」
+     布林通道多空戰法 ——「月線往上、股價在上通道跟月線間震盪：多頭」（往下反之）
+     籌碼基礎篇 ——「大戶增散戶減→股價向上」「集保戶數減→股價漲」「券資比>30%為高券資比」
+   講義裡的「主力買賣超」需要券商分點資料，免費拿不到，那一條只能缺著（畫面上會註明）。
+   這是訊號統計，不是買賣建議。 */
+function bias(r,o,d,k){
+  d=d||{}; k=k||{};
+  var bull=[], bear=[], n=0, miss=[], warn=[], noShort=[], noLong=[];
+  function up(w,t){ bull.push(t); n+=w; }
+  function dn(w,t){ bear.push(t); n-=w; }
+
+  var slopeUp0 = nn(d.slopeUp) && d.slopeUp>0;     // 上軌翹
+  var monthUp  = nn(d.slope20) && d.slope20>0;     // 月線升
+  var monthDn  = nn(d.slope20) && d.slope20<0;     // 月線下彎
+
+  // ── 多方四大條件（講義：「主力買，投信買，上軌翹，月線升」）
+  //    這四條在講義裡是要「同時成立」的檢查清單，不是各自獨立的加分項；
+  //    而且月線升／上軌翹本來就高度連動，分開計分會把同一件事算三次。
+  //    所以改成看「中了幾條」，中越多分數才跳越高。
+  var bullHit=[], bearHit=[];
+  if(monthUp)  bullHit.push('月線升 '+pc1(d.slope20)+(d.slope20>1?'（超級強勢股，講義說做空只能短空）':''));
+  if(slopeUp0) bullHit.push('上軌翹 '+pc1(d.slopeUp)+(d.slopeUp>3?'（紅燈，講義說做空要避開）':''));
+  if(k.invD>0) bullHit.push('投信買，已連買 '+k.invD+' 天');
+  if(bullHit.length) up(bullHit.length>=3?4:(bullHit.length===2?2:1),
+    '多方四大條件中了 '+bullHit.length+'/3：'+bullHit.join('、')+
+    (bullHit.length>=3?' —— 四條裡拿得到的全中':''));
+  miss.push('主力買賣超（要券商分點資料，免費取得不到）');
+
+  // ── 波段空單的獲利要素（講義原文五條，拿得到三條；同樣算「中幾條」）
+  if(monthDn)  bearHit.push('月線下彎 '+pc1(d.slope20)+(d.slope20<-1?'（超級弱勢股，講義說做多只能短多）':''));
+  if(k.invD<0) bearHit.push('投信賣，已連賣 '+(-k.invD)+' 天（代替拿不到的主力賣超）');
+  if(nn(k.smallChg)&&k.smallChg>0.3)
+               bearHit.push('散戶持股比率週增 '+pc1(k.smallChg)+'（講義：散戶買進→股價易跌難漲）');
+  if(nn(k.holdersChg)&&k.holdersChg>0)
+               bearHit.push('集保戶數增加 '+n0(k.holdersChg)+' 人（講義：集保戶數增→股價跌）');
+  if(bearHit.length) dn(bearHit.length>=3?4:(bearHit.length===2?2:1),
+    '空單獲利要素中了 '+bearHit.length+'/4：'+bearHit.join('、'));
+  if(nn(k.holdersChg)&&k.holdersChg<0)
+    up(1,'集保戶數減少 '+n0(k.holdersChg)+' 人：講義「集保戶數減→股價漲」');
+
+  // ── 布林通道多空戰法：位階要配月線方向才算數，門檻是中軌不是 ±5
+  //    多頭看上軌、空頭看下軌 —— 同一條通道，兩邊看的不是同一條線。
+  if(nn(d.bbPos)){
+    if(monthUp && d.bbPos>0 && d.bbPos<=10)
+      up(1,'多頭型態：月線往上、股價在上通道與月線之間（位階 '+n1(d.bbPos)+'）—— 多頭看的是上軌，講義「做多找翹上軌」');
+    else if(monthDn && d.bbPos<0 && d.bbPos>=-10)
+      dn(1,'空頭型態：月線往下、股價在下通道與月線之間（位階 '+n1(d.bbPos)+'）—— 空頭看的是下軌，下軌是這段的目標區');
+    else if(monthDn && d.bbPos>0)
+      dn(1,'月線下彎、股價卻反彈到中軌之上（位階 '+n1(d.bbPos)+'）：講義「做空找位階高」，空單要等反彈到上緣才進，不是追殺低點');
+  }
+  // ── 兩條軌各自的門檻，講義給的是不對稱的：上軌 >3 是「做空避開」，下軌 <−3 是「做空綠燈」
+  if(nn(d.slopeLo)&&d.slopeLo<-3)
+    dn(1,'下軌斜率 '+pc1(d.slopeLo)+'：講義的做空綠燈（門檻 −3%），整條通道往下開，空頭的軌道成形'+
+        '〔但本站用 2025-09～2026-08 的日線回測，這一格反而是反向的：這種股票後面 20 天平均是反彈的，'+
+        '空它反而虧 2.3%。講義那條可能是講當沖不是波段，自己斟酌〕');
+
+  /* ── 多空不對稱的「避開條件」──────────────────────────────
+     講義做空結論：「避開強勢股，強勢股嘎空太恐怖」；2-3 做空實務：「避開上通斜率超過 3%」。
+     這兩條不是反向訊號（不加多方分），是「這個方向不要做」的否決條件，所以另外列。
+     反過來多方也有一條：月線斜率 < −1 的超級弱勢股，講義說做多只能短多。 */
+  if(nn(d.slopeUp)&&d.slopeUp>3)
+    noShort.push('上軌斜率 '+pc1(d.slopeUp)+'：講義做空實務明寫「避開上通斜率超過 3%」，上軌還在往外開就不是空點');
+  if(nn(d.slope20)&&d.slope20>1)
+    noShort.push('月線斜率 '+pc1(d.slope20)+'：超級強勢股，講義「避開強勢股，強勢股嘎空太恐怖」');
+  if(nn(d.slopeLo)&&d.slopeLo<-3)
+    noLong.push('下軌斜率 '+pc1(d.slopeLo)+'：下軌還在往外開，通道往下擴，這種不要去接刀');
+  if(nn(d.slope20)&&d.slope20<-1)
+    noLong.push('月線斜率 '+pc1(d.slope20)+'：超級弱勢股，講義說做多只能短多');
+
+  // ── 開布林：講義原文「往上帶量開布林是個好買」「往下帶量開布林是個好空」
+  //    「帶量」是條件的一部分 —— 沒量的張口不算真發動，講義沒給量的數字，
+  //    這裡沿用 b1 情境的門檻：均量比 ≥ 1.5（今日量至少是前 20 日均量的 1.5 倍）。
+  var squeezed = nn(d.bbWMin10) && d.bbWMin10<=10;
+  var opening  = nn(d.bbWChg) && d.bbWChg>0.5;
+  var withVol  = nn(d.vr20) && d.vr20>=1.5;
+  if(squeezed && opening){
+    if(withVol && slopeUp0)
+      up(2,'往上帶量開布林：先壓縮到 '+n1(d.bbWMin10)+'%（講義門檻 10%）、張口 '+pc1(d.bbWChg)+
+          '、均量比 '+n2(d.vr20)+' 有量，講義說是個好買點');
+    else if(withVol && nn(d.slopeLo) && d.slopeLo<0)
+      dn(2,'往下帶量開布林：壓縮後張口 '+pc1(d.bbWChg)+'、下軌往下、均量比 '+n2(d.vr20)+
+          ' 有量，講義說是個好空點');
+    else if(!withVol)
+      warn.push('通道有張口（帶寬 '+pc1(d.bbWChg)+'）但均量比只有 '+
+                (nn(d.vr20)?n2(d.vr20):'—')+'　講義說要「帶量」開布林才算數，沒量的張口不是真發動');
+  }
+
+  // ── 講義同一頁：「離開上軌的黑K 是短線賣點」「離開下軌的紅K是短線回補(買)點」
+  if(nn(r.o) && nn(r.c)){
+    var black = r.c < r.o, red = r.c > r.o;
+    if(black && nn(d.bbUp) && nn(r.h) && r.h >= d.bbUp)
+      dn(1,'碰到上軌後收黑K：講義「離開上軌的黑K 是短線賣點」');
+    if(red && nn(d.bbLo) && nn(r.l) && r.l <= d.bbLo)
+      up(1,'跌破下軌後收紅K：講義「離開下軌的紅K是短線回補(買)點」');
+  }
+
+  // ── 股價在高檔時要小心：主力賣，散戶買，大戶減，散戶增
+  if(nn(d.biasY)){
+    if(d.biasY>40) dn(2,'乖離年線 '+pc1(d.biasY)+'：已過空方策略3 的 40% 門檻');
+    else if(d.biasY>30) dn(1,'乖離年線 '+pc1(d.biasY)+'：講義歸類為高檔出貨股');
+  }
+  // ── 大戶增散戶減 → 股價向上；大戶減散戶增 → 股價向下
+  if(nn(k.bigChg)){
+    if(k.bigChg>0.3) up(1,'千張大戶持股週增 '+pc1(k.bigChg)+'：講義「大戶增→股價向上」，有主力照顧的特徵');
+    else if(k.bigChg<-0.3) dn(1,'千張大戶持股週減 '+pc1(k.bigChg)+'：講義「大戶減→股價向下」');
+  }
+  if(nn(k.smallChg)&&k.smallChg<-0.3)
+    up(1,'散戶持股比率週減 '+pc1(k.smallChg)+'：講義「散戶減→股價向上」');
+
+  // ── 法人在出、散戶用融資接
+  if(nn(k.inv)&&k.inv<0&&nn(k.mgnChg)&&k.mgnChg>0)
+    dn(1,'投信賣超但融資反增 '+n0(k.mgnChg)+' 張：講義「融資增加代表散戶看多」，法人出散戶接');
+  // ── 融資維持率紅綠燈：130% 是追繳線。距警戒 = 維持率 − 130。
+  //    （這條不在講義裡，是市場通用的融資成數／追繳線算法）
+  if(nn(k.mgnRate)){
+    var mg=mrGap(k.mgnRate);
+    if(k.mgnRate<130)
+      dn(2,'融資維持率 '+n0s(k.mgnRate)+'% 紅燈（距警戒 '+mg+'）：已跌破 130% 追繳線，融資戶套牢、隨時可能斷頭殺出〔非講義，市場通則〕');
+    else if(k.mgnRate<140)
+      dn(1,'融資維持率 '+n0s(k.mgnRate)+'% 橘燈（距警戒 '+mg+'）：剛從追繳線上方拉回來，上方還套著大量融資，彈上去就有解套賣壓〔非講義，市場通則〕');
+    // ── 「股價下跌而融資大減，才是真的在換手」：綠燈 + 今天下跌 + 融資明顯減少 → 籌碼相對乾淨
+    else if(k.mgnRate>=160 && nn(r.chg) && r.chg<0 && nn(k.mgnChg) && nn(k.mgn) && k.mgn>0 &&
+            k.mgnChg<0 && (-k.mgnChg/k.mgn)>=0.03)
+      up(1,'綠燈（維持率 '+n0s(k.mgnRate)+'%、距警戒 '+mg+'）而且今天下跌 '+pc1(r.chg)+
+          ' 的同時融資減 '+n0s(-k.mgnChg)+' 張（'+n1(-k.mgnChg/k.mgn*100)+'%）：下跌但融資大減才是真的在換手，籌碼相對乾淨〔非講義，市場通則〕');
+  }
+  // ── 券資比：講義明寫 > 30% 才叫高券資比
+  if(nn(k.sr)&&k.sr>30)
+    up(1,'券資比 '+n1(k.sr)+'%：講義「>30% 為高券資比」，空單多、回補買盤強');
+  // ── 爆量
+  if(nn(d.vr20)&&d.vr20>3)
+    dn(1,'均量比 '+n2(d.vr20)+'：爆量，講義說若有大量隔日沖，黑K機率大增');
+
+  var tag = n>=4?'偏多' : (n<=-4?'偏空' : (bull.length||bear.length?'混合':'中性'));
+  // 避開條件跟分數無關 —— 分數是「偏哪邊」，這個是「哪個方向講義叫你不要做」，兩件事分開看
+  var vetoes=[];
+  if(noShort.length) vetoes.push({side:'空', list:noShort});
+  if(noLong.length)  vetoes.push({side:'多', list:noLong});
+  return {n:n, tag:tag, bull:bull, bear:bear, miss:miss, warn:warn, vetoes:vetoes};
+}
+
+function biasCell(b){
+  var cls = b.tag==='偏多'?'r':(b.tag==='偏空'?'s':'m');
+  var tip = (b.bull.length?'偏多：\n・'+b.bull.join('\n・'):'')+
+            (b.bull.length&&b.bear.length?'\n\n':'')+
+            (b.bear.length?'偏空：\n・'+b.bear.join('\n・'):'');
+  if(b.warn&&b.warn.length) tip += (tip?'\n\n':'')+'注意：\n・'+b.warn.join('\n・');
+  (b.vetoes||[]).forEach(function(v){
+    tip += (tip?'\n\n':'')+'講義說這種不要做'+v.side+'：\n・'+v.list.join('\n・');
+  });
+  tip = tip || '沒有明顯訊號';
+  return '<td title="'+esc(tip)+'"><span class="'+cls+'">'+b.tag+
+         (b.n?(' '+(b.n>0?'+':'')+b.n):'')+'</span>'+
+         (b.vetoes||[]).map(function(v){return '<span class="veto">不宜'+v.side+'</span>';}).join('')+'</td>';
+}
+
+// 查詢頁：把偏多、偏空的理由整條列出來，讓你自己判斷哪幾條算數
+function biasBlock(r,o){
+  var b=bias(r,o,ind(r.code),chip(r.code));
+  if(!b.bull.length && !b.bear.length) return '';
+  var cls = b.tag==='偏多'?'bull':(b.tag==='偏空'?'bear':'flat');
+  var li=function(a){ return a.map(function(s){return '<li>'+s+'</li>';}).join(''); };
+  return '<div class="biasbox '+cls+'">'+
+    '<div class="biashead">多空傾向：<b>'+b.tag+'</b>'+(b.n?('　講義訊號淨分 '+(b.n>0?'+':'')+b.n):'')+
+      '<span class="sub">　（依講義原文統計，不是買賣建議）</span></div>'+
+    (b.warn&&b.warn.length?'<div class="biaswarn">⚠ '+b.warn.join('<br>⚠ ')+'</div>':'')+
+    (b.vetoes||[]).map(function(v){
+      return '<div class="biasveto"><b>講義說這種不要做'+v.side+'</b>　'+v.list.join('<br>')+'</div>';
+    }).join('')+
+    (b.miss&&b.miss.length?'<div class="biasmiss">缺：'+b.miss.join('、')+'</div>':'')+
+    (b.bull.length?'<div class="biascol"><div class="t up">偏多 '+b.bull.length+' 條</div><ul>'+li(b.bull)+'</ul></div>':'')+
+    (b.bear.length?'<div class="biascol"><div class="t down">偏空 '+b.bear.length+' 條</div><ul>'+li(b.bear)+'</ul></div>':'')+
+    '</div>';
+}
+
 function sortVal(it,key){
+  if(key==='bias') return it.b?it.b.n:null;
   if(key==='close') return it.r.c;
   if(key==='vol') return it.r.vol;
   if(key==='runNet') return it.d?((it.d.runUp||0)-(it.d.runDn||0)):null;
@@ -1135,12 +1437,38 @@ function sortVal(it,key){
 }
 
 // 表頭：文字 + 排序 key。key 是空的就不能點（例如「股票」和最後的走勢鈕）。
+/* 每一欄：標題、排序 key、說明（滑鼠停著或長按會看到）。
+   說明一律寫「數字往哪邊代表偏多還是偏空」，篩完才知道該往哪個方向想。 */
 var COLS=[
-  ['股票',''],['昨收','close'],['漲跌','chgPct'],['量(張)','vol'],['週轉率','turn'],
-  ['均量比','vr20'],['月線斜率','slope20'],['位階','bbPos'],['帶寬','bbW'],['帶寬變化','bbWChg'],
-  ['上通斜率','slopeUp'],['下通斜率','slopeLo'],['乖離年線','biasY'],['連漲/跌','runNet'],
-  ['投信(張)','inv'],['投信連買','invD'],['外資(張)','fgn'],['大戶%','big'],['大戶Δ','bigChg'],
-  ['券資比','sr'],['支撐','sup'],['交界','mid'],['壓力','res'],['金額(億)','val'],['','']
+  ['股票','',''],
+  ['多空傾向','bias','照講義原文統計：多方看「主力買、投信買、上軌翹、月線升」，空方看「月線下彎、主力賣、散戶買進、集保戶數大增」。正的偏多、負的偏空，停在數字上會列出是哪幾條。主力買賣超要分點資料，免費拿不到，那一條缺著。另外講義有兩條「不要做」的避開條件，方向對得上時會在後面標紅字：做空要避開上軌斜率 > 3% 與月線斜率 > 1% 的強勢股（嘎空太恐怖），做多要避開下軌斜率 < −3% 與月線斜率 < −1% 的弱勢股（只能短多）。訊號統計，不是買賣建議。'],
+  ['昨收','close','前一個交易日的收盤價。'],
+  ['漲跌','chgPct','前一日漲跌幅。'],
+  ['量(張)','vol','前一日成交張數。'],
+  ['週轉率','turn','成交張數 ÷ 流通股數。越高代表換手越兇、越適合短線；上櫃有些股票拿不到股本會顯示「—」。'],
+  ['均量比','vr20','今日量 ÷ 前 20 日均量。> 3 是爆量 —— 教材說若同時有大量隔日沖，當天收黑K的機率大增，偏空。'],
+  ['月線斜率','slope20','MA20 今天比昨天的變化。> 1% 是超級強勢股（要做空只能短空）；< −1% 是超級弱勢股（要做多只能短多）。這是教材最看重的一條。'],
+  ['位階','bbPos','布林通道裡的位置：上軌 10、中軌 0、下軌 −10。講義：「月線往上、股價在上通道跟月線間震盪＝多頭」「月線往下、股價在下通道跟月線間＝空頭」—— 要配合月線方向看，光看位階不算數。<b>進場點兩邊不一樣</b>：講義寫「做多找翹上軌；做空找位階高」，也就是多單順著上軌走，空單要等月線下彎的股票反彈到中軌之上再空，不是追殺已經在下軌的低點。'],
+  ['帶寬','bbW','上軌 ÷ 下軌 − 1。< 5% 是極度擠壓（Squeeze），等著看往哪邊張口；> 20% 波動大、適合當沖。'],
+  ['帶寬變化','bbWChg','今天帶寬 − 昨天帶寬。由負轉正＝通道開口打開，就是「開布林」。要配合上通／下通斜率才知道是往上還往下開。'],
+  ['上通斜率','slopeUp','布林上軌今天比昨天的變化。<b>上軌是多方那一側的線</b>：做多看上軌翹不翹（翹＝「主力買，投信買，上軌翹，月線升」四條件之一），做空則是拿它當避開條件 —— 講義做空實務明寫「避開上通斜率超過 3%」，上軌還在往外開就不是空點，強勢股嘎空太恐怖。所以 > 3% 對做多是加分、對做空是紅燈，同一個數字兩邊意義相反。'],
+  ['下通斜率','slopeLo','布林下軌今天比昨天的變化。<b>下軌是空方那一側的線</b>：做空看下軌有沒有往下開，講義給的綠燈門檻是 < −3%，整條通道往下擴代表空頭軌道成形；做多則是拿它當避開條件，下軌還在往外開的股票不要去接刀。門檻跟上軌的 +3% 對稱，但用途是反過來的。<b>回測注意</b>：拿 2025-09～2026-08 的日線回測，「下軌 < −3% 拿來空」後面 20 天平均是虧 2.3%（那些股票反而會反彈），「下軌 −3～0% 拿來空」才是小賺。也就是在波段這個尺度上，這個綠燈門檻是反過來的 —— 講義那條可能是講當沖。本站沒有自作主張改掉講義的算法，只把回測結果標在這裡給你判斷。'],
+  ['乖離年線','biasY','收盤 ÷ MA240 − 1。> 30% 教材歸類為高檔出貨股，> 40% 是空方策略3 的門檻，偏空。'],
+  ['連漲/跌','runNet','連續上漲（紅）或連續下跌（綠）幾天。連跌 3 天以上是教材「敲開連續跌停」的反彈候選。'],
+  ['投信(張)','inv','投信前一日買賣超張數。紅正綠負。'],
+  ['投信連買','invD','投信連續買超或賣超幾天。教材說投信要作帳、不能亂跑，是最好追蹤的一支法人 —— 連買 3 天以上偏多，連賣 3 天以上偏空。'],
+  ['外資(張)','fgn','外資（不含外資自營商）前一日買賣超張數。'],
+  ['大戶%','big','持股 1,000 張以上的人合計佔集保庫存的比率。越高代表籌碼越集中在大戶手上。'],
+  ['大戶Δ','bigChg','大戶比率這一週的增減（集保每週五更新）。講義：「大戶增、散戶減 → 股價向上；大戶減、散戶增 → 股價向下」，而且「有主力照顧的股票，大戶持股比率增加、散戶持股比率下降」。'],
+  ['融資維持率','mgnRate','融資戶現在賺還賠。＝現價 ÷（估計平均成本 × 融資成數）× 100。剛融資買進時是 166.7%（講義：融資成數 60%），跌到 130% 券商就開始追繳、再跌就斷頭。這欄的顏色是紅綠燈不是漲跌：綠 >160（沒壓力）／黃 140–160（小賠還撐得住）／橘 130–140（剛從追繳線拉回來，上方套著大量融資）／紅 <130（已在追繳區）。滑鼠移上去會顯示「距警戒」＝ 維持率 − 130，看還剩幾個百分點被追繳，比看維持率本身直覺。綠燈＋股價下跌而融資大減，才是真的在換手，籌碼相對乾淨；反過來紅燈剛拉回來的最好避開。平均成本是用 300 天的融資餘額增減配股價反推的（證交所只公佈張數不公佈金額），是估計值。'],
+  ['散戶Δ','smallChg','散戶（百張以下）持股比率的週增減。講義：「散戶大買、股價高檔→偏空」「散戶大賣、股價低檔→偏多」，一般視為股市反指標。'],
+  ['戶數Δ','holdersChg','集保戶數的週增減。講義：「集保戶數減 → 股價漲；集保戶數增 → 股價跌」—— 戶數增加代表股票分散到多數人手上。'],
+  ['券資比','sr','融券餘額 ÷ 融資餘額。講義：「> 30% 為高券資比」—— 空單多，未來回補的買盤就強，反而偏多。'],
+  ['支撐','sup','收盤 − 0.75×振幅。跌破這裡多單要小心。'],
+  ['交界','mid','(高＋低＋2×收) ÷ 4。開盤在交界之上偏多起跑，之下偏空起跑。'],
+  ['壓力','res','收盤 ＋ 0.75×振幅。站上這裡空單要小心。'],
+  ['金額(億)','val','前一日成交金額。太小的標的滑價會很傷，通常至少要 1 億以上。'],
+  ['','','']
 ];
 
 function theadHTML(){
@@ -1148,11 +1476,11 @@ function theadHTML(){
   var asc=document.getElementById('f-dir').value==='asc';
   var h='';
   for(var i=0;i<COLS.length;i++){
-    var t=COLS[i][0], k=COLS[i][1];
-    if(!k){ h+='<th>'+t+'</th>'; continue; }
+    var t=COLS[i][0], k=COLS[i][1], note=COLS[i][2]||'';
+    if(!k){ h+='<th'+(note?' title="'+esc(note)+'"':'')+'>'+t+'</th>'; continue; }
     var on=(k===key);
     h+='<th class="sortable'+(on?' on':'')+'" data-k="'+k+'" role="button" tabindex="0" '+
-       'title="點一下用「'+t+'」排序，再點一下換方向">'+t+
+       'title="'+esc(note+(note?'\n\n':'')+'（點一下用「'+t+'」排序，再點一下換方向）')+'">'+t+
        '<span class="arw">'+(on?(asc?'▲':'▼'):'')+'</span></th>';
   }
   return h;
@@ -1186,12 +1514,12 @@ function runScan(){
   var invd=num('f-invd'),inv=num('f-inv'),invs=num('f-invs');
   var fgn=num('f-fgn'),fgnd=num('f-fgnd');
   var bigc=num('f-bigc'),big=num('f-big'),sr=num('f-sr');
-  var mg1=num('f-mgnc1'),mg2=num('f-mgnc2');
+  var mg1=num('f-mgnc1'),mg2=num('f-mgnc2'),mr1=num('f-mr1'),mr2=num('f-mr2');
   var needInd = s1!==null||s2!==null||b1!==null||b2!==null||w1!==null||w2!==null||
                 y1!==null||y2!==null||vr!==null||ru!==null||rd!==null||st!==null||
                 wc!==null||wm!==null||st2!==null||sl!==null;
   var needChip = invd!==null||inv!==null||invs!==null||fgn!==null||fgnd!==null||
-                 bigc!==null||big!==null||sr!==null||mg1!==null||mg2!==null;
+                 bigc!==null||big!==null||sr!==null||mg1!==null||mg2!==null||mr1!==null||mr2!==null;
   var key=document.getElementById('f-sort').value;
   var dir=document.getElementById('f-dir').value==='asc'?1:-1;
   var out=[], missing=0, missChip=0;
@@ -1242,8 +1570,10 @@ function runScan(){
       if(sr!==null && (!nn(k.sr)||k.sr<sr)) continue;
       if(mg1!==null && (!nn(k.mgnChg)||k.mgnChg<mg1)) continue;
       if(mg2!==null && (!nn(k.mgnChg)||k.mgnChg>mg2)) continue;
+      if(mr1!==null && (!nn(k.mgnRate)||k.mgnRate<mr1)) continue;
+      if(mr2!==null && (!nn(k.mgnRate)||k.mgnRate>mr2)) continue;
     }
-    out.push({r:r,o:o,d:d,k:k});
+    out.push({r:r,o:o,d:d,k:k,b:bias(r,o,d,k)});
   }
   // 沒有值的（例如上櫃沒有週轉率）一律沉到最後，不管是由大到小還是由小到大，
   // 不然升序時整個第一頁都是「—」，等於什麼都看不到。
@@ -1294,10 +1624,16 @@ function showMore(){
       return '<td><span class="'+(v>0?'r':(v<0?'s':'m'))+'">'+n0(v)+'</span></td>';
     };
     // 帶寬變化：開口紅、收口綠，跟教材的「開布林」對齊
+    // 張口了但沒量，在數字後面加個「量」的灰標，一眼看出不是真發動
+    var openNoVol = nn(d.bbWChg)&&d.bbWChg>0.5&&nn(d.bbWMin10)&&d.bbWMin10<=10&&
+                    !(nn(d.vr20)&&d.vr20>=1.5);
     var wch = nn(d.bbWChg)
-      ? '<td><span class="'+(d.bbWChg>0?'r':(d.bbWChg<0?'s':'m'))+'">'+pc1(d.bbWChg)+'</span></td>'
+      ? '<td'+(openNoVol?' title="通道張口了但沒帶量，講義說要帶量才算真發動"':'')+
+        '><span class="'+(d.bbWChg>0?'r':(d.bbWChg<0?'s':'m'))+'">'+pc1(d.bbWChg)+'</span>'+
+        (openNoVol?'<span class="novol">無量</span>':'')+'</td>'
       : '<td class="na">—</td>';
     html+='<tr><td class="nm"><em>'+esc(r.code)+'</em>'+esc(r.name)+'</td>'+
+      biasCell(add[i].b)+
       '<td>'+n2(r.c)+'</td>'+
       '<td class="'+(o.chgPct>=0?'up':'down')+'">'+(o.chgPct===null?'—':pc(o.chgPct))+'</td>'+
       cell(r.vol,function(v){return String(Math.round(v));})+
@@ -1315,6 +1651,16 @@ function showMore(){
       cell(k.big,function(v){return n1(v)+'%';})+
       (nn(k.bigChg)
         ? '<td><span class="'+(k.bigChg>0?'r':(k.bigChg<0?'s':'m'))+'">'+pc1(k.bigChg)+'</span></td>'
+        : '<td class="na">—</td>')+
+      (nn(k.mgnRate)
+        ? '<td title="'+esc(mrTip(k.mgnRate)+(nn(k.mgnCost)?('\n估計平均成本 '+n2(k.mgnCost)+' 元'):''))+'">'+
+          mrHTML(k.mgnRate)+'</td>'
+        : '<td class="na">—</td>')+
+      (nn(k.smallChg)
+        ? '<td><span class="'+(k.smallChg>0?'s':(k.smallChg<0?'r':'m'))+'">'+pc1(k.smallChg)+'</span></td>'
+        : '<td class="na">—</td>')+
+      (nn(k.holdersChg)
+        ? '<td><span class="'+(k.holdersChg>0?'s':(k.holdersChg<0?'r':'m'))+'">'+n0(k.holdersChg)+'</span></td>'
         : '<td class="na">—</td>')+
       cell(k.sr,function(v){return n1(v)+'%';})+
       '<td><span class="s">'+n2(o.sup)+'</span></td>'+
@@ -1504,9 +1850,11 @@ function indPanel(o){
   h+=indCard('前10日最小帶寬', nn(o.bbWMin10)?n1(o.bbWMin10)+'%':null,
         (nn(o.bbWMin10)&&o.bbWMin10<=10)?'張口前有先擠壓':'—',
         (nn(o.bbWMin10)&&o.bbWMin10<=10)?'flag':'');
-  h+=indCard('上通斜率', nn(o.slopeUp)?pc1(o.slopeUp):null, o.slopeUp>3?'紅燈｜做空要避開':'—',
+  h+=indCard('上通斜率', nn(o.slopeUp)?pc1(o.slopeUp):null,
+        o.slopeUp>3?'多方的線｜> 3% 做空要避開':(o.slopeUp>0?'多方的線｜上軌翹':'多方的線'),
         o.slopeUp>3?'flag':'');
-  h+=indCard('下通斜率', nn(o.slopeLo)?pc1(o.slopeLo):null, o.slopeLo<-3?'綠燈':'—',
+  h+=indCard('下通斜率', nn(o.slopeLo)?pc1(o.slopeLo):null,
+        o.slopeLo<-3?'空方的線｜< −3% 做空綠燈':'空方的線',
         o.slopeLo<-3?'flag':'');
   h+=indCard('乖離年線', nn(o.biasY)?pc1(o.biasY):null,
         o.biasY>40?'空方策略3 門檻':(o.biasY>30?'高檔出貨股':'—'),
@@ -1671,6 +2019,35 @@ function renderStatus(){
       (state.chipMeta&&state.chipMeta.date?('（資料日 '+prettyDate(state.chipMeta.date)+'）'):'')+'</span>'+
     (state.nTrading?('<span>已涵蓋交易日：<b>'+state.nTrading+'</b> 天'+
       '（另有 <b>'+state.nHoliday+'</b> 天是放假沒開盤，本來就沒有資料）</span>'):'');
+  renderOverall();
+}
+/* 標頭上的一行整體維持率 */
+function mrHeadHTML(){
+  if(state.empty||!Object.keys(state.chip).length) return '';
+  var o=overallMR(); if(!o.all) return '';
+  return '<span title="'+esc('全市場融資戶整體的維持率（總現值 ÷ 總融資金額）。\n'+
+    '低於 166.7% 代表平均已經在虧，越靠近 130% 追繳線越危險。\n詳細拆解看「資料」分頁。')+
+    '">整體維持率 <b class="lv '+mrLv(o.all.rate)+'">'+n1(o.all.rate)+'%</b></span>';
+}
+/* 整體融資維持率：全市場的融資戶現在整體賺還賠。單一檔會失真，全市場加總很穩。 */
+function renderOverall(){
+  var box=document.getElementById('overall');
+  if(!box) return;
+  if(state.empty || !Object.keys(state.chip).length){ box.hidden=true; return; }
+  var o=overallMR();
+  if(!o.all){ box.hidden=true; return; }
+  var one=function(lab,x){
+    if(!x) return '';
+    return '<span class="one">'+lab+' <b class="lv '+mrLv(x.rate)+'">'+n1(x.rate)+'%</b>'+
+      ' <span class="chip">距警戒 '+mrGap(x.rate)+'</span> <span class="chip">'+x.n+' 檔</span></span>';
+  };
+  box.hidden=false;
+  box.innerHTML='<span class="ttl">整體融資維持率（資料日 '+
+    (state.chipMeta&&state.chipMeta.date?prettyDate(state.chipMeta.date):'—')+'）</span>'+
+    one('全市場',o.all)+one('上市',o['1'])+one('上櫃',o['2'])+
+    '<span class="why">把每檔的融資餘額 × 現價當成總現值，除以融資餘額 × 估計平均成本 × 融資成數（上市 60%、上櫃 50%）算出來的總融資金額。'+
+    '低於 166.7% 表示全市場的融資戶平均已經在虧，越靠近 130% 追繳線，指數一跌就越容易出現連環斷頭。'+
+    '單一檔的估計成本會失真，但全市場加總起來夠穩，可以當市場情緒的溫度計。</span>';
 }
 function say(txt,ok){
   var m=document.getElementById('msg');

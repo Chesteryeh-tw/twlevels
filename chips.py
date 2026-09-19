@@ -38,9 +38,16 @@ RAW_COLS = "code,fgn,inv,dlrSelf,dlrHedge,mgn,mgnPrev,shrt,shrtPrev"
 
 # chips.txt 的欄位（衍生值）
 COLS = ("code,fgn,fgnD,inv,invD,dlrH,mgn,mgnChg,shrt,sr,"
-        "big,bigChg,small,holders")
+        "big,bigChg,small,smallChg,holders,holdersChg,mgnRate,mgnCost,mgnConf")
 
-LOOKBACK = 40        # 算連買連賣要回看幾個交易日
+# 融資成數：上市自備款 4 成（借 6 成）、上櫃自備款 5 成（借 5 成）。
+# 講義只寫「一般情況融資成數 60%、自備款 40%」，處置股會被調降，
+# 這裡用一般值估算，處置期間會失真。
+MARGIN_RATE = {"1": 0.6, "2": 0.5}
+MARGIN_DEFAULT = 0.6
+
+LOOKBACK = 40         # 算連買連賣要回看幾個交易日
+MARGIN_LOOKBACK = 300 # 估融資平均成本要回看幾個交易日（越長越準）
 PAUSE = 1.2
 
 
@@ -341,6 +348,75 @@ def streak(series):
 _MKT_CACHE = {}
 
 
+def market_info():
+    """market.txt → {code: (mkt, close)}。算融資維持率要用現價和市場別。"""
+    info = {}
+    if not os.path.exists(T.MARKET):
+        return info
+    with open(T.MARKET, encoding="utf-8") as fh:
+        head = fh.readline().strip().split("|")[-1].split(",")
+        try:
+            i_mkt, i_close = head.index("mkt"), head.index("close")
+        except ValueError:
+            return info
+        for line in fh:
+            p = line.rstrip("\n").split(",")
+            if len(p) <= max(i_mkt, i_close) or not p[0]:
+                continue
+            c = T.pn(p[i_close])
+            if c and c > 0:
+                info[p[0]] = (p[i_mkt], c)
+    return info
+
+
+def margin_cost(code, days, chipcache, pxcache):
+    """估算目前融資餘額的平均買進成本，用移動平均成本法。
+
+    每天融資餘額比前一天多出來的部分，當成「那天用當天收盤價融資買進」；
+    餘額減少時當成按比例平倉，平均成本不變。這是籌碼網站的標準估法 ——
+    證交所只公佈餘額張數，不公佈金額，成本只能這樣反推。
+
+    回傳 (平均成本, 可信度)。可信度 = 視窗內累積新增 ÷ 目前餘額：
+    接近 1 代表現在的部位大多是在這段期間建立的，估出來的成本才可信；
+    很小代表大部分部位在 267 天之前就進場了，成本是猜的。
+    """
+    px = pxcache.get(code)
+    if px is None:
+        px = {}
+        for d, line in T.read_stock(code).items():
+            p = line.split(",")
+            if len(p) >= 5:
+                v = T.pn(p[4])
+                if v and v > 0:
+                    px[d] = v
+        pxcache[code] = px
+    if not px:
+        return None, None
+
+    cost, bal, added = None, 0.0, 0.0
+    for d in days:
+        row = chipcache.get(d, {}).get(code)
+        if row is None:
+            continue
+        m = row.get("mgn")
+        p = px.get(d)
+        if m is None or m < 0 or p is None:
+            continue
+        if bal <= 0:
+            if m > 0:
+                cost, added = p, m       # 視窗內第一次看到餘額，只能假設就在這天建立
+            bal = m
+            continue
+        delta = m - bal
+        if delta > 0:
+            cost = (cost * bal + p * delta) / m
+            added += delta
+        bal = m
+    if not cost or bal <= 0:
+        return None, None
+    return cost, min(1.0, added / bal)
+
+
 def market_codes():
     """market.txt 裡的股票代號。T86 連權證、ETN 都給，不篩會多出一萬多筆。"""
     if "v" in _MKT_CACHE:
@@ -366,9 +442,18 @@ def derive():
         print("還沒有任何籌碼資料，先跑一次 python chips.py。")
         return 0
 
-    recent = days[-LOOKBACK:][::-1]          # 由新到舊
+    recent = days[-LOOKBACK:][::-1]          # 由新到舊，算連買連賣用
     cache = {d: read_day(d) for d in recent}
     today = cache[recent[0]]
+
+    # 估融資成本要看更長的一段（連買天數只要 40 天，成本要盡量涵蓋整批部位）
+    mdays = days[-MARGIN_LOOKBACK:]          # 由舊到新
+    mcache = dict(cache)
+    for d in mdays:
+        if d not in mcache:
+            mcache[d] = read_day(d)
+    info = market_info()
+    pxcache = {}
 
     keep = market_codes()
     if keep:
@@ -394,9 +479,25 @@ def derive():
 
         t_new = tdcc_new.get(code, {})
         t_old = tdcc_old.get(code, {})
+        # 教材：大戶增、散戶減 → 股價向上；大戶減、散戶增 → 股價向下
+        #       集保戶數減 → 股價漲；集保戶數增 → 股價跌
+        # 所以三個都要算「跟上一期比」的變化，不是只看當期水位。
+        def wk(key):
+            a, b = t_new.get(key), t_old.get(key)
+            return (a - b) if (a is not None and b is not None) else None
         big = t_new.get("big")
-        big_old = t_old.get("big")
-        big_chg = (big - big_old) if (big is not None and big_old is not None) else None
+        big_chg = wk("big")
+        small_chg = wk("small")
+        holders_chg = wk("holders")
+
+        # 融資維持率 = 現價 ÷ (平均成本 × 融資成數) × 100
+        rate = mcost = conf = None
+        if mgn and mgn > 0 and code in info:
+            mkt, px_now = info[code]
+            mcost, conf = margin_cost(code, mdays, mcache, pxcache)
+            if mcost and mcost > 0:
+                r = MARGIN_RATE.get(mkt, MARGIN_DEFAULT)
+                rate = px_now / (mcost * r) * 100
 
         lines.append(",".join([
             code,
@@ -408,7 +509,12 @@ def derive():
             ("" if big is None else "%.2f" % big),
             ("" if big_chg is None else "%.2f" % big_chg),
             ("" if t_new.get("small") is None else "%.2f" % t_new["small"]),
+            ("" if small_chg is None else "%.2f" % small_chg),
             T.fmt(t_new.get("holders")),
+            T.fmt(holders_chg),
+            ("" if rate is None else "%.1f" % rate),
+            ("" if mcost is None else "%.2f" % mcost),
+            ("" if conf is None else "%.2f" % conf),
         ]))
 
     os.makedirs(T.DATA, exist_ok=True)
