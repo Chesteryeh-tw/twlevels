@@ -50,8 +50,22 @@ def day_path(dstr):
     return os.path.join(CHIP_DIR, dstr + ".txt")
 
 
-def have_day(dstr):
-    return os.path.exists(day_path(dstr))
+def have_day(dstr, min_ratio=0.9):
+    """這天的籌碼抓齊了沒。
+
+    不能只看檔案在不在。櫃買維護那天會寫出一個「只有上市」的半套檔，
+    下次再跑時若只看檔名存在就跳過，上櫃那半永遠補不回來 ——
+    這正是 2026-09-18 發生的事。所以這裡比對 market.txt 的股票清單，
+    涵蓋率不夠就當作沒抓過，重抓一次覆蓋掉。
+    """
+    rows = read_day(dstr)
+    if not rows:
+        return False
+    keep = market_codes()
+    if not keep:
+        return True                 # 沒有 market.txt 可比對，就不多管
+    hit = sum(1 for c in rows if c in keep)
+    return hit >= len(keep) * min_ratio
 
 
 def write_day(dstr, rows):
@@ -324,8 +338,14 @@ def streak(series):
     return n * sign
 
 
+_MKT_CACHE = {}
+
+
 def market_codes():
     """market.txt 裡的股票代號。T86 連權證、ETN 都給，不篩會多出一萬多筆。"""
+    if "v" in _MKT_CACHE:
+        return _MKT_CACHE["v"]
+    _MKT_CACHE["v"] = None
     if not os.path.exists(T.MARKET):
         return None
     codes = set()
@@ -335,7 +355,8 @@ def market_codes():
             c = line.split(",")[0].strip()
             if c:
                 codes.add(c)
-    return codes or None
+    _MKT_CACHE["v"] = codes or None
+    return _MKT_CACHE["v"]
 
 
 def derive():
@@ -459,7 +480,7 @@ def run_latest():
         print("meta.json 沒有資料日。")
         return 0
     if have_day(ds):
-        print("籌碼 %s 已經有了，不重抓。" % ds)
+        print("籌碼 %s 已經抓齊，不重抓。" % ds)
         return 0
     day = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:]), tzinfo=T.TPE)
     print("抓 %s 的籌碼 ..." % ds)
