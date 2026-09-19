@@ -324,6 +324,20 @@ def streak(series):
     return n * sign
 
 
+def market_codes():
+    """market.txt 裡的股票代號。T86 連權證、ETN 都給，不篩會多出一萬多筆。"""
+    if not os.path.exists(T.MARKET):
+        return None
+    codes = set()
+    with open(T.MARKET, encoding="utf-8") as fh:
+        fh.readline()
+        for line in fh:
+            c = line.split(",")[0].strip()
+            if c:
+                codes.add(c)
+    return codes or None
+
+
 def derive():
     """讀最近幾天的每日檔＋集保，算出 chips.txt。"""
     days = chip_days()
@@ -334,6 +348,13 @@ def derive():
     recent = days[-LOOKBACK:][::-1]          # 由新到舊
     cache = {d: read_day(d) for d in recent}
     today = cache[recent[0]]
+
+    keep = market_codes()
+    if keep:
+        skipped = len(today) - sum(1 for c in today if c in keep)
+        today = {c: v for c, v in today.items() if c in keep}
+        print("  只留 market.txt 裡的 %d 檔（濾掉權證等 %d 筆）"
+              % (len(today), skipped))
 
     tdcc_new, tdcc_old = read_tdcc_latest_two()
 
