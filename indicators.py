@@ -16,8 +16,12 @@
            > 1 超級強勢；< −1 超級弱勢
   bbUp/bbLo  布林上下軌 = MA20 ± 2 倍標準差（母體）
   bbPos      位階：上軌 = 10、中軌 = 0、下軌 = −10（線性，不夾限）
-  bbW        布林帶寬 = 上軌/下軌 − 1，百分比
-             < 5 不適合當沖；< 10 有效壓縮；> 20 適合當沖
+  bbW        布林帶寬 = 上通/下通 − 1，百分比
+             < 5 股價長期振幅小，不適合當沖；> 20 股價短線振幅大，適合當沖
+  bbWChg     帶寬變化 = 帶寬(今) − 帶寬(昨)，百分點
+             正值＝開口（開布林），負值＝收口
+  bbWMin10   前 10 日帶寬的最小值，用來判斷「開布林之前有沒有先壓縮」
+             教材：往上帶量開布林是好買點；往下帶量開布林是好空點
   slopeUp    上通斜率 = 上軌(今)/上軌(昨) − 1，百分比　> 3 紅燈
   slopeLo    下通斜率 = 下軌(今)/下軌(昨) − 1，百分比　< −3 綠燈
   biasY      乖離年線 = 收盤/MA240 − 1，百分比　> 30 高檔出貨股
@@ -35,7 +39,7 @@ import twse as T
 OUT = os.path.join(T.DATA, "daily.txt")
 
 COLS = ("code,ma5,ma20,ma60,ma240,slope20,bbUp,bbLo,bbPos,bbW,"
-        "slopeUp,slopeLo,biasY,runUp,runDn,vr20,vrY,ndays")
+        "slopeUp,slopeLo,biasY,runUp,runDn,vr20,vrY,ndays,bbWChg,bbWMin10")
 
 
 def mean(xs):
@@ -141,12 +145,31 @@ def compute(closes, vols):
     else:
         o["bbW"] = o["bbPos"] = None
 
+    def bandwidth(seq):
+        _, u, l = boll(seq)
+        if u is None or l is None or l <= 0:
+            return None
+        return (u / l - 1) * 100
+
     if len(closes) >= 21:
         _, up0, lo0 = boll(closes[:-1])
         o["slopeUp"] = pct_change(up, up0)
         o["slopeLo"] = pct_change(lo, lo0)
+        w0 = bandwidth(closes[:-1])
+        o["bbWChg"] = (o["bbW"] - w0) if (o["bbW"] is not None and w0 is not None) else None
     else:
-        o["slopeUp"] = o["slopeLo"] = None
+        o["slopeUp"] = o["slopeLo"] = o["bbWChg"] = None
+
+    # 前 10 個交易日（不含今日）的帶寬最小值 → 判斷開布林之前有沒有先壓縮
+    if len(closes) >= 30:
+        mins = []
+        for back in range(1, 11):
+            w = bandwidth(closes[:-back])
+            if w is not None:
+                mins.append(w)
+        o["bbWMin10"] = min(mins) if mins else None
+    else:
+        o["bbWMin10"] = None
 
     o["biasY"] = pct_change(c, o["ma240"]) if o["ma240"] else None
 
@@ -173,6 +196,7 @@ def line_for(code, o):
         str(o["runUp"]), str(o["runDn"]),
         f(o["vr20"]), f(o["vrY"]),
         str(o["ndays"]),
+        f(o["bbWChg"], 1), f(o["bbWMin10"], 1),
     ])
 
 
