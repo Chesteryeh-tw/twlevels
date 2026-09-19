@@ -194,14 +194,31 @@ def fetch_tpex(day):
     return rows
 
 
-def fetch_day(day, pause=1.0):
-    """回傳當日全市場（上市＋上櫃）；非交易日回傳空 list。"""
+def fetch_day_split(day, pause=1.0):
+    """回傳 (上市 rows, 上櫃 rows)。兩邊都可能是空的。"""
     tw = fetch_twse(day)
     if not tw:
-        return []
+        return [], []
     time.sleep(pause)
     tp = fetch_tpex(day)
     time.sleep(pause)
+    return tw, tp
+
+
+def fetch_day(day, pause=1.0):
+    """回傳當日全市場（上市＋上櫃）。
+
+    只有一邊抓得到時一律回空 list —— 這是刻意的。
+    櫃買有維護時段，之前那樣直接回「只有上市」的結果，
+    會把 market.txt 覆蓋成少了 868 檔上櫃的半套資料，
+    畫面上查上櫃股票全部變成查無此股，比少更新一天糟糕得多。
+    """
+    tw, tp = fetch_day_split(day, pause=pause)
+    if not tw:
+        return []
+    if not tp:
+        print("      上市有 %d 檔但上櫃是空的 —— 當成沒抓到，不覆蓋既有資料" % len(tw))
+        return []
     return tw + tp
 
 
