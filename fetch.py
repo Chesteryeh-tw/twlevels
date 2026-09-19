@@ -21,23 +21,35 @@ def main():
 
     start = T.target_day(now)
     picked = None
-    blank_days = []       # 抓不到資料的日期，之後要記成非交易日
+    blank_days = []       # 兩邊都沒資料的日期 → 放假，之後記成非交易日
+    partial = 0           # 只有一邊有資料 → 對方在維護，不能當成放假
     for back in range(12):
         day = start - timedelta(days=back)
         if day.weekday() >= 5:
             continue
         print("  嘗試 %s ..." % day.strftime("%Y-%m-%d"))
-        rows = T.fetch_day(day)
-        if rows:
-            n1 = sum(1 for r in rows if r["mkt"] == "1")
-            print("    上市 %d 檔、上櫃 %d 檔" % (n1, len(rows) - n1))
-            picked = (day, rows)
+        tw, tp = T.fetch_day_split(day)
+        if tw and tp:
+            print("    上市 %d 檔、上櫃 %d 檔" % (len(tw), len(tp)))
+            picked = (day, tw + tp)
             break
+        if tw or tp:
+            # 有一邊活著就代表這天有開盤，只是另一邊拿不到（例如櫃買維護）。
+            # 這種日子絕對不能記成非交易日，否則行事曆會被寫壞。
+            print("    只有%s有資料（上市 %d／上櫃 %d）—— 這天有開盤，"
+                  "但資料不完整，不採用也不記成放假"
+                  % ("上市" if tw else "上櫃", len(tw), len(tp)))
+            partial += 1
+            continue
         print("    非交易日或尚未出檔")
         blank_days.append(day)
 
     if not picked:
-        print("錯誤：連續 12 天都抓不到資料。")
+        if partial:
+            print("錯誤：有交易日但資料不完整（很可能是證交所或櫃買正在維護）。"
+                  "這次不動任何檔案，等下一次排程再試。")
+        else:
+            print("錯誤：連續 12 天都抓不到資料。")
         sys.exit(1)
 
     day, rows = picked
