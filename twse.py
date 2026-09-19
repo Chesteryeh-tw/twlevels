@@ -207,25 +207,33 @@ def fetch_day(day, pause=1.0):
 
 # ---------------------------------------------------------------- 流通股數
 
-def load_shares(max_age_days=20):
+def load_shares(max_age_days=20, min_codes=1500):
+    """流通股數（千股）。快取一陣子，但缺太多檔就重抓。
+
+    以前這裡只看檔案的 mtime，在 GitHub Actions 上永遠失效 ——
+    每次 checkout 都會把檔案時間設成當下，所以快取「永遠是新的」，
+    上櫃那批股本從來沒被抓進來過，上櫃週轉率也就一直是空的。
+    現在改成同時看「筆數夠不夠」，缺了就重抓。
+    """
     if os.path.exists(SHARES):
+        cached = {}
+        with open(SHARES, encoding="utf-8") as fh:
+            for line in fh:
+                p = line.strip().split(",")
+                if len(p) == 2 and p[0]:
+                    cached[p[0]] = p[1]
         age = (time.time() - os.path.getmtime(SHARES)) / 86400
-        if age < max_age_days:
-            m = {}
-            with open(SHARES, encoding="utf-8") as fh:
-                for line in fh:
-                    p = line.strip().split(",")
-                    if len(p) == 2 and p[0]:
-                        m[p[0]] = p[1]
-            print("  流通股數：沿用快取 %d 檔" % len(m))
-            return m
+        if age < max_age_days and len(cached) >= min_codes:
+            print("  流通股數：沿用快取 %d 檔" % len(cached))
+            return cached
+        print("  流通股數：快取只有 %d 檔（要 %d 檔），重抓"
+              % (len(cached), min_codes))
 
     m = {}
     srcs = [
         "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
-        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O",
-        "https://www.tpex.org.tw/openapi/v1/t187ap03_O",
-        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_L",
+        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O",   # 上櫃，892 檔
+        "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_R",   # 興櫃，備用
     ]
     for url in srcs:
         arr = get_json(url, tries=2)
