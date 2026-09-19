@@ -69,6 +69,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .badge.ok{background:var(--sup-bg);color:var(--sup);border-color:var(--sup)}
 .badge.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
 .badge.demo{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.badge.hold{background:var(--surface2);color:var(--muted);border-color:var(--line)}
 .refresh{background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;
   padding:3px 11px;font-size:12.5px;cursor:pointer}
 .refresh:hover{border-color:var(--accent);color:var(--accent)}
@@ -169,7 +170,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .count{color:var(--muted);font-size:13.5px;font-family:"IBM Plex Mono",monospace}
 
 .tablewrap{overflow-x:auto;margin-top:18px;border:1px solid var(--line2);border-radius:12px;background:var(--surface)}
-table{border-collapse:collapse;width:100%;min-width:860px;font-size:13.5px}
+table{border-collapse:collapse;width:100%;min-width:1180px;font-size:13.5px}
 th{text-align:right;font-size:11px;letter-spacing:.06em;color:var(--muted);
   font-weight:500;padding:11px 12px;border-bottom:1px solid var(--line);background:var(--surface2);white-space:nowrap}
 th:first-child,td:first-child{text-align:left;padding-left:16px}
@@ -305,6 +306,8 @@ details.manual[open]{padding-bottom:16px}
         <button class="preset bear" data-preset="p5">月線下彎量增跌</button>
         <button class="preset bear" data-preset="p6">價背離空（半套）</button>
         <button class="preset" data-preset="p7">隔日沖出貨警示</button>
+        <button class="preset bull" data-preset="b1">往上帶量開布林</button>
+        <button class="preset bear" data-preset="b2">往下帶量開布林</button>
         <button class="preset" data-preset="hot">高週轉高振幅</button>
         <button class="preset" data-preset="reset">清除條件</button>
       </div>
@@ -334,12 +337,16 @@ details.manual[open]{padding-bottom:16px}
         <div class="field"><label for="f-run">連漲 ≥ / 連跌 ≥</label>
           <div class="range"><input id="f-runup" inputmode="decimal" placeholder="漲"><span>／</span><input id="f-rundn" inputmode="decimal" placeholder="跌"></div></div>
         <div class="field"><label for="f-supt">上通斜率 ≤（%）</label><input id="f-supt" inputmode="decimal"></div>
+        <div class="field"><label for="f-wchg">帶寬變化 ≥（開布林）</label><input id="f-wchg" inputmode="decimal"></div>
+        <div class="field"><label for="f-wmin">前10日最小帶寬 ≤</label><input id="f-wmin" inputmode="decimal"></div>
+        <div class="field"><label for="f-supt2">上通斜率 ≥（%）</label><input id="f-supt2" inputmode="decimal"></div>
+        <div class="field"><label for="f-slot">下通斜率 ≤（%）</label><input id="f-slot" inputmode="decimal"></div>
         <div class="field"><label for="f-sort">排序依據</label>
           <select id="f-sort">
             <option value="val">成交金額</option><option value="turn">週轉率</option>
             <option value="slope20">月線斜率</option><option value="bbPos">布林位階</option>
             <option value="bbW">布林帶寬</option><option value="biasY">乖離年線</option>
-            <option value="vr20">均量比</option>
+            <option value="vr20">均量比</option><option value="bbWChg">帶寬變化</option><option value="slopeUp">上通斜率</option><option value="slopeLo">下通斜率</option>
             <option value="width">三線帶寬</option><option value="ampPct">振幅%</option>
             <option value="chgPct">漲跌幅%</option><option value="pos">收盤位置</option>
             <option value="close">股價</option>
@@ -570,6 +577,15 @@ function indicators(bars){
   var bb0 = cl.length>=21 ? boll(cl.slice(0,-1)) : null;
   o.slopeUp=(bb&&bb0)?pctChg(bb.up,bb0.up):null;
   o.slopeLo=(bb&&bb0)?pctChg(bb.lo,bb0.lo):null;
+  // 帶寬變化（開布林）與前 10 日最小帶寬（開口前有沒有先壓縮）
+  function bw(seq){ var b=boll(seq); return (b&&b.lo>0)?(b.up/b.lo-1)*100:null; }
+  var w0 = cl.length>=21 ? bw(cl.slice(0,-1)) : null;
+  o.bbWChg = (nn(o.bbW)&&nn(w0)) ? o.bbW-w0 : null;
+  if(cl.length>=30){
+    var mins=[];
+    for(var bk=1;bk<=10;bk++){ var w=bw(cl.slice(0,-bk)); if(nn(w)) mins.push(w); }
+    o.bbWMin10 = mins.length?Math.min.apply(null,mins):null;
+  } else o.bbWMin10=null;
   o.biasY=o.ma240?pctChg(c,o.ma240):null;
   var up=0,dn=0,k=cl.length-1;
   while(k>=1&&cl[k]>cl[k-1]){ up++; k--; }
@@ -601,7 +617,8 @@ function calc(r){
 }
 
 var MKT={1:'上市',2:'上櫃'};
-var state={meta:null, rows:[], byCode:{}, empty:true, src:'—', ind:{}, indMeta:null};
+var state={meta:null, rows:[], byCode:{}, empty:true, src:'—', ind:{}, indMeta:null,
+           holidays:{}, nTrading:0, nHoliday:0};
 
 function indexRows(){
   state.byCode={};
@@ -650,7 +667,8 @@ function parseDaily(txt){
       slope20:num0(p[5]),bbUp:num0(p[6]),bbLo:num0(p[7]),bbPos:num0(p[8]),bbW:num0(p[9]),
       slopeUp:num0(p[10]),slopeLo:num0(p[11]),biasY:num0(p[12]),
       runUp:num0(p[13])||0,runDn:num0(p[14])||0,vr20:num0(p[15]),vrY:num0(p[16]),
-      ndays:num0(p[17])||0};
+      ndays:num0(p[17])||0,
+      bbWChg:(p.length>18?num0(p[18]):null), bbWMin10:(p.length>19?num0(p[19]):null)};
   }
   return {meta:{date:hp[1]||'',fetched:hp[2]||''}, map:map};
 }
@@ -691,7 +709,21 @@ function loadServer(manual){
     })
     .catch(function(){ return null; });
 
-  Promise.all([pMarket,pDaily]).then(function(res){
+  var pDays=fetch('data/days.json?t='+Date.now(),{cache:'no-store'})
+    .then(function(r){ return r.ok?r.json():null; })
+    .then(function(j){
+      if(!j) return null;
+      var hol={}, nt=0, nh=0;
+      for(var k in j){
+        if(j[k]===0){ hol[k]=1; nh++; }
+        else if(Object.prototype.toString.call(j[k])==='[object Array]') nt++;
+      }
+      state.holidays=hol; state.nTrading=nt; state.nHoliday=nh;
+      return j;
+    })
+    .catch(function(){ return null; });
+
+  Promise.all([pMarket,pDaily,pDays]).then(function(res){
     renderAll();
     if(manual) say('已讀取：資料日 '+prettyDate(res[0].meta.date)+'，共 '+res[0].rows.length+' 檔'+
       (res[1]?('，指標 '+Object.keys(state.ind).length+' 檔'):'，指標檔還沒產生')+'。',true);
@@ -703,13 +735,43 @@ function loadServer(manual){
   });
 }
 
+function ymd(d){
+  return ''+d.getFullYear()+('0'+(d.getMonth()+1)).slice(-2)+('0'+d.getDate()).slice(-2);
+}
+function fromYmd(s){ return new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8)); }
+function isOpenDay(d){
+  var w=d.getDay();
+  return w!==0 && w!==6 && !state.holidays[ymd(d)];
+}
+// 台股遇到國定假日、颱風假就不開盤，那幾天本來就不會有資料。
+// days.json 記著程式實際抓不到資料的日子，這裡拿來當行事曆用。
 function expectedDate(){
-  var d=new Date(), hr=d.getHours();
-  if(!(d.getDay()>=1&&d.getDay()<=5&&hr>=16)){
-    do{ d.setDate(d.getDate()-1); }while(d.getDay()===0||d.getDay()===6);
+  var d=new Date();
+  if(d.getHours()<16) d.setDate(d.getDate()-1);   // 還沒收盤，最新的只會是昨天
+  for(var i=0;i<30;i++){
+    if(isOpenDay(d)) return ymd(d);
+    d.setDate(d.getDate()-1);
   }
-  while(d.getDay()===0||d.getDay()===6){ d.setDate(d.getDate()-1); }
-  return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();
+  return ymd(d);
+}
+// 資料日和「應該有的最新交易日」之間，漏了幾個不是已知假日的平日
+function staleBy(dataDate){
+  var exp=expectedDate();
+  if(String(dataDate)>=exp) return 0;
+  var d=fromYmd(String(dataDate)), gap=0, guard=0;
+  d.setDate(d.getDate()+1);
+  while(ymd(d)<=exp && guard++<60){
+    if(isOpenDay(d)) gap++;
+    d.setDate(d.getDate()+1);
+  }
+  return gap;
+}
+function freshBadge(dataDate){
+  var gap=staleBy(dataDate);
+  if(gap===0) return '<span class="badge ok">最新</span>';
+  // 只差一天：極可能是還沒學到的假日（例如剛放的颱風假），不要亂報警
+  if(gap===1) return '<span class="badge hold">可能是假日</span>';
+  return '<span class="badge warn">落後 '+gap+' 個交易日</span>';
 }
 var WD=['日','一','二','三','四','五','六'];
 function prettyDate(s){
@@ -735,18 +797,17 @@ function renderReadout(){
   }
   var a=0,b=0;
   for(var i=0;i<state.rows.length;i++){ if(state.rows[i].mkt==='2')b++; else a++; }
-  var fresh = +state.meta.date >= expectedDate();
   el.innerHTML =
     '<span>資料日 <b>'+prettyDate(state.meta.date)+'</b></span>'+
     '<span>上市 <b>'+a+'</b>　上櫃 <b>'+b+'</b></span>'+
     '<span>更新 <b>'+prettyFetched(state.meta.fetched)+'</b></span>'+
-    (fresh?'<span class="badge ok">最新</span>':'<span class="badge warn">可能不是最新</span>');
+    freshBadge(state.meta.date);
   document.getElementById('foot').innerHTML =
     '這組點位適用於 <b>'+prettyDate(state.meta.date)+' 的下一個交易日</b>。'+
     '公式：振幅 A = 高－低；壓力 = 收＋0.75A；交界 = (高＋低＋2×收) ÷ 4；支撐 = 收－0.75A，'+
     '再依台股檔位取整（平手往下）。<br>'+
     '布林通道 = 20 日均線 ± 2 倍標準差；月線斜率 = MA20(今)/MA20(昨)−1；'+
-    '乖離年線 = 收盤/MA240−1；均量比 = 今日量 ÷ 前 20 日均量。'+
+    '乖離年線 = 收盤/MA240−1；均量比 = 今日量 ÷ 前 20 日均量；'+'帶寬 = 上軌/下軌−1，帶寬變化 = 今日帶寬−昨日帶寬（正值即「開布林」）。'+
     '資料來源：臺灣證券交易所、證券櫃檯買賣中心公開資料。<br>'+
     '本頁只做計算與整理，不構成任何投資建議。';
 }
@@ -767,6 +828,9 @@ function indLine(code){
   if(d.runDn) bits.push('連跌 <b>'+d.runDn+'</b> 天');
   if(nn(d.vr20)) bits.push('均量比 <b>'+n2(d.vr20)+'</b>'+
     (d.vr20>3?' <span class="chip note">爆量</span>':''));
+  if(nn(d.bbWChg)) bits.push('帶寬變化 <b>'+pc1(d.bbWChg)+'</b>'+
+    (d.bbWChg>0.5&&nn(d.bbWMin10)&&d.bbWMin10<15
+      ? ' <span class="chip '+(d.slopeUp>0?'hot':'cool')+'">開布林</span>' : ''));
   if(!bits.length) return '';
   return '<div class="metrics sub">'+bits.map(function(s){return '<span>'+s+'</span>';}).join('')+'</div>';
 }
@@ -871,7 +935,7 @@ function num(id){var el=document.getElementById(id);if(!el)return null;var v=el.
 function setv(id,v){var el=document.getElementById(id);if(el)el.value=(v===null||v===undefined)?'':v;}
 var F=['f-val','f-lot','f-turn','f-amp','f-chg1','f-chg2','f-pos1','f-pos2','f-px1','f-px2',
        'f-slope1','f-slope2','f-bpos1','f-bpos2','f-bw1','f-bw2','f-bias1','f-bias2',
-       'f-vr','f-runup','f-rundn','f-supt'];
+       'f-vr','f-runup','f-rundn','f-supt','f-wchg','f-wmin','f-supt2','f-slot'];
 
 var PRESETS={
   p1:{note:'多方策略2＋做多結論：月線上升、站上月線、位階翻正、量能放大。Phase 3 接上投信連買後會更準。',
@@ -888,6 +952,10 @@ var PRESETS={
       s:{lot:300,chg1:3,slope2:0,bias1:20,sort:'chgPct'}},
   p7:{note:'12大籌碼「均量比 > 3 且有大量隔日沖，當天黑K機率大幅提升」。這裡只篩得到量的部分。',
       s:{val:1,vr:3,chg1:5,sort:'vr20'}},
+  b1:{note:'教材「往上帶量開布林是個好買點」：通道由壓縮轉開口、上軌往上翹、位階翻正、而且要帶量。圖上標的「發動點」就是這裡。',
+      s:{val:1,wchg:0.5,supt2:0,bpos1:0,vr:1.5,wmin:15,sort:'bbWChg'}},
+  b2:{note:'教材「往下帶量開布林是個好空點」：通道開口但下軌往下走、位階為負、帶量下殺。',
+      s:{val:1,wchg:0.5,slot:0,bpos2:0,chg2:0,vr:1.5,wmin:15,sort:'bbWChg'}},
   hot:{note:'高週轉、高振幅，純粹找今天最會動的。',
       s:{val:1,turn:10,amp:5,sort:'turn'}},
   reset:{note:'把所有條件清空，自己從頭設。',s:{}}
@@ -919,6 +987,10 @@ function applyPreset(p){
   setv('f-runup',s.runup===undefined?null:s.runup);
   setv('f-rundn',s.rundn===undefined?null:s.rundn);
   setv('f-supt',s.supt===undefined?null:s.supt);
+  setv('f-wchg',s.wchg===undefined?null:s.wchg);
+  setv('f-wmin',s.wmin===undefined?null:s.wmin);
+  setv('f-supt2',s.supt2===undefined?null:s.supt2);
+  setv('f-slot',s.slot===undefined?null:s.slot);
   document.getElementById('f-sort').value=s.sort||'val';
   document.getElementById('f-dir').value=s.dir||'desc';
   document.getElementById('pnote').textContent=P.note;
@@ -941,11 +1013,13 @@ function runScan(){
   var w1=num('f-bw1'),w2=num('f-bw2');
   var y1=num('f-bias1'),y2=num('f-bias2');
   var vr=num('f-vr'),ru=num('f-runup'),rd=num('f-rundn'),st=num('f-supt');
+  var wc=num('f-wchg'),wm=num('f-wmin'),st2=num('f-supt2'),sl=num('f-slot');
   var needInd = s1!==null||s2!==null||b1!==null||b2!==null||w1!==null||w2!==null||
-                y1!==null||y2!==null||vr!==null||ru!==null||rd!==null||st!==null;
+                y1!==null||y2!==null||vr!==null||ru!==null||rd!==null||st!==null||
+                wc!==null||wm!==null||st2!==null||sl!==null;
   var key=document.getElementById('f-sort').value;
   var dir=document.getElementById('f-dir').value==='asc'?1:-1;
-  var INDKEYS={slope20:1,bbPos:1,bbW:1,biasY:1,vr20:1};
+  var INDKEYS={slope20:1,bbPos:1,bbW:1,biasY:1,vr20:1,bbWChg:1,slopeUp:1,slopeLo:1};
   var out=[], missing=0;
 
   for(var i=0;i<state.rows.length;i++){
@@ -976,6 +1050,10 @@ function runScan(){
       if(ru!==null && d.runUp<ru) continue;
       if(rd!==null && d.runDn<rd) continue;
       if(st!==null && (!nn(d.slopeUp)||d.slopeUp>st)) continue;
+      if(st2!==null && (!nn(d.slopeUp)||d.slopeUp<st2)) continue;
+      if(sl!==null && (!nn(d.slopeLo)||d.slopeLo>sl)) continue;
+      if(wc!==null && (!nn(d.bbWChg)||d.bbWChg<wc)) continue;
+      if(wm!==null && (!nn(d.bbWMin10)||d.bbWMin10>wm)) continue;
     }
     out.push({r:r,o:o,d:d});
   }
@@ -1008,22 +1086,31 @@ function showMore(){
   var wrap=document.getElementById('ftable');
   if(!shown){
     wrap.innerHTML='<div class="tablewrap"><table><thead><tr>'+
-      '<th>股票</th><th>昨收</th><th>漲跌</th><th>量(張)</th><th>均量比</th>'+
-      '<th>月線斜率</th><th>位階</th><th>布林帶寬</th><th>乖離年線</th><th>連漲/跌</th>'+
+      '<th>股票</th><th>昨收</th><th>漲跌</th><th>量(張)</th><th>週轉率</th><th>均量比</th>'+
+      '<th>月線斜率</th><th>位階</th><th>帶寬</th><th>帶寬變化</th><th>上通斜率</th><th>下通斜率</th>'+
+      '<th>乖離年線</th><th>連漲/跌</th>'+
       '<th>支撐</th><th>交界</th><th>壓力</th><th>金額(億)</th><th></th></tr></thead><tbody></tbody></table></div>';
   }
   var add=scanRes.slice(shown,shown+10), tb=wrap.querySelector('tbody'), html='';
   for(var i=0;i<add.length;i++){
     var r=add[i].r,o=add[i].o,d=add[i].d||{};
     var run = d.runUp?('<span class="r">+'+d.runUp+'</span>'):(d.runDn?('<span class="s">-'+d.runDn+'</span>'):'—');
+    // 帶寬變化：開口紅、收口綠，跟教材的「開布林」對齊
+    var wch = nn(d.bbWChg)
+      ? '<td><span class="'+(d.bbWChg>0?'r':(d.bbWChg<0?'s':'m'))+'">'+pc1(d.bbWChg)+'</span></td>'
+      : '<td class="na">—</td>';
     html+='<tr><td class="nm"><em>'+esc(r.code)+'</em>'+esc(r.name)+'</td>'+
       '<td>'+n2(r.c)+'</td>'+
       '<td class="'+(o.chgPct>=0?'up':'down')+'">'+(o.chgPct===null?'—':pc(o.chgPct))+'</td>'+
       cell(r.vol,function(v){return String(Math.round(v));})+
+      cell(o.turn,function(v){return n2(v)+'%';})+
       cell(d.vr20,n2)+
       cell(d.slope20,pc1)+
       cell(d.bbPos,n1)+
       cell(d.bbW,function(v){return n1(v)+'%';})+
+      wch+
+      cell(d.slopeUp,pc1)+
+      cell(d.slopeLo,pc1)+
       cell(d.biasY,pc1)+
       '<td>'+run+'</td>'+
       '<td><span class="s">'+n2(o.sup)+'</span></td>'+
@@ -1200,13 +1287,19 @@ function indCard(k,v,note,cls){
 function indPanel(o){
   var h='';
   h+=indCard('月線斜率', nn(o.slope20)?pc1(o.slope20):null,
-        o.slope20>1?'超級強勢':(o.slope20<-1?'超級弱勢':'—'),
+        o.slope20>1?'超級強勢｜要空只能短空':(o.slope20<-1?'超級弱勢｜要多只能短多':'—'),
         o.slope20>1?'good':(o.slope20<-1?'bad':''));
   h+=indCard('布林位階', nn(o.bbPos)?n1(o.bbPos):null,'上軌10／中軌0／下軌-10',
         o.bbPos>=10?'good':(o.bbPos<=-10?'bad':''));
   h+=indCard('布林帶寬', nn(o.bbW)?n1(o.bbW)+'%':null,
         o.bbW>20?'適合當沖':(o.bbW<5?'不適合當沖':(o.bbW<10?'有效壓縮':'—')),
         o.bbW>20?'good':(o.bbW<5?'bad':''));
+  h+=indCard('帶寬變化', nn(o.bbWChg)?pc1(o.bbWChg):null,
+        o.bbWChg>0?'開口（開布林）':(o.bbWChg<0?'收口':'—'),
+        o.bbWChg>0?'good':(o.bbWChg<0?'bad':''));
+  h+=indCard('前10日最小帶寬', nn(o.bbWMin10)?n1(o.bbWMin10)+'%':null,
+        (nn(o.bbWMin10)&&o.bbWMin10<15)?'開口前有先壓縮':'—',
+        (nn(o.bbWMin10)&&o.bbWMin10<15)?'flag':'');
   h+=indCard('上通斜率', nn(o.slopeUp)?pc1(o.slopeUp):null, o.slopeUp>3?'紅燈｜做空要避開':'—',
         o.slopeUp>3?'flag':'');
   h+=indCard('下通斜率', nn(o.slopeLo)?pc1(o.slopeLo):null, o.slopeLo<-3?'綠燈':'—',
@@ -1368,7 +1461,9 @@ function renderStatus(){
     '<span>收錄檔數：<b>'+state.rows.length+'</b> 檔</span>'+
     '<span>技術指標：<b>'+(nInd?(nInd+' 檔'):'還沒產生')+'</b>'+
       (state.indMeta?('（'+prettyFetched(state.indMeta.fetched)+'）'):'')+'</span>'+
-    '<span>這份資料來自：<b>'+state.src+'</b></span>';
+    '<span>這份資料來自：<b>'+state.src+'</b></span>'+
+    (state.nTrading?('<span>已涵蓋交易日：<b>'+state.nTrading+'</b> 天'+
+      '（另有 <b>'+state.nHoliday+'</b> 天是放假沒開盤，本來就沒有資料）</span>'):'');
 }
 function say(txt,ok){
   var m=document.getElementById('msg');
