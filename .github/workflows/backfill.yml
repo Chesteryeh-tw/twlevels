@@ -11,6 +11,11 @@ on:
         description: '補到幾天前為止（0 = 補到今天）'
         required: true
         default: '0'
+      chips:
+        description: '要不要一起補籌碼（三大法人、融資融券）？會多花不少時間'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -41,6 +46,17 @@ jobs:
         if: always()
         continue-on-error: true
         run: python indicators.py
+
+      # 籌碼要等行情補完才跑：chips.py 是照 days.json 的交易日清單去抓的
+      - name: 集保股權分散
+        if: always() && inputs.chips
+        continue-on-error: true
+        run: python tdcc.py
+
+      - name: 回補籌碼
+        if: always() && inputs.chips
+        continue-on-error: true
+        run: python chips.py "${{ inputs.days_from }}" "${{ inputs.days_to }}"
 
       - name: 存回倉庫（即使中途失敗也存）
         if: always()
