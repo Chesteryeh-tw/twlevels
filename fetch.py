@@ -21,7 +21,7 @@ def main():
 
     start = T.target_day(now)
     picked = None
-    skipped = []          # 抓不到資料的日期，之後要記成非交易日
+    blank_days = []       # 抓不到資料的日期，之後要記成非交易日
     for back in range(12):
         day = start - timedelta(days=back)
         if day.weekday() >= 5:
@@ -34,7 +34,7 @@ def main():
             picked = (day, rows)
             break
         print("    非交易日或尚未出檔")
-        skipped.append(day)
+        blank_days.append(day)
 
     if not picked:
         print("錯誤：連續 12 天都抓不到資料。")
@@ -67,7 +67,7 @@ def main():
     # 只記「今天以前」的：今天可能只是證交所還沒出檔，不能當成放假。
     today = now.date()
     learned = 0
-    for d in skipped:
+    for d in blank_days:
         if d.date() >= today:
             continue
         k = d.strftime("%Y%m%d")
