@@ -120,13 +120,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .band-mid{position:absolute;top:0;bottom:0;width:2px;background:var(--mid);transform:translateX(-1px)}
 .band-close{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px dashed var(--text);opacity:.55}
 .band-fill{position:absolute;top:0;bottom:0;background:rgba(158,113,6,.14)}
-.scale{position:relative;height:38px;margin-top:5px}
+/* 第一列放三個點位，第二列單獨給昨收 —— 昨收和交界位常常只差一兩元，
+   擠在同一列一定會疊字。分兩列就不必為了閃避而把標籤藏起來。 */
+.scale{position:relative;height:74px;margin-top:5px}
 .tickmk{position:absolute;top:0;transform:translateX(-50%);text-align:center;white-space:nowrap}
 .tickmk .lab{font-size:10.5px;letter-spacing:.06em;color:var(--muted);display:block;line-height:1.3}
 .tickmk .val{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:600;line-height:1.25;display:block}
 .tickmk.l{transform:none;text-align:left;left:0}
 .tickmk.r{transform:none;text-align:right;right:0;left:auto}
-.tickmk.dash .val{font-weight:500;font-size:13px;color:var(--muted)}
+.tickmk.row2{top:36px}
+/* 昨收是「參考線」不是算出來的點位，所以顏色淡一階，但字級與排版跟其他三個一致 */
+.tickmk.dash .lab,.tickmk.dash .val{color:var(--muted)}
 .t-res .val{color:var(--res)} .t-mid .val{color:var(--mid)} .t-sup .val{color:var(--sup)}
 
 .metrics{display:flex;flex-wrap:wrap;gap:3px 20px;margin-top:14px;padding-top:12px;
@@ -948,7 +952,6 @@ function railHTML(r,o,isExample){
   if(o.gap<0){ vcls='bull'; vtxt='交界比昨收低 '+n2(-o.gap)+' 元 → 平盤開盤即在交界之上，偏多起跑。'; }
   else if(o.gap>0){ vcls='bear'; vtxt='交界比昨收高 '+n2(o.gap)+' 元 → 平盤開盤在交界之下，偏空起跑。'; }
   var chg = o.chgPct===null?'':' <span class="'+(o.chgPct>=0?'up':'down')+'">'+pc(o.chgPct)+'</span>';
-  var far = Math.abs(clPos-midPos)<9;   // 昨收和交界太近就不畫標籤，避免疊字
 
   return '<div class="rail'+(isExample?' example':'')+'">'+
     '<div class="rail-top"><div class="rail-id">'+
@@ -963,7 +966,8 @@ function railHTML(r,o,isExample){
     '<div class="scale">'+
       '<div class="tickmk l t-sup"><span class="lab">支撐位</span><span class="val">'+n2(o.sup)+'</span></div>'+
       '<div class="tickmk t-mid" style="left:'+midPos.toFixed(2)+'%"><span class="lab">交界位</span><span class="val">'+n2(o.mid)+'</span></div>'+
-      (far?'':'<div class="tickmk dash" style="left:'+clPos.toFixed(2)+'%;top:20px"><span class="val">昨收 '+n2(r.c)+'</span></div>')+
+      '<div class="tickmk dash row2" style="left:'+clPos.toFixed(2)+'%">'+
+        '<span class="lab">昨收</span><span class="val">'+n2(r.c)+'</span></div>'+
       '<div class="tickmk r t-res"><span class="lab">壓力位</span><span class="val">'+n2(o.res)+'</span></div></div>'+
     '<div class="metrics">'+
       '<span>振幅 <b>'+n2(o.amp)+'</b>（<b>'+n1(o.ampPct)+'%</b>）</span>'+
