@@ -1,0 +1,101 @@
+name: FinMind 補歷史 + 重跑回測
+
+# 手動觸發。不排程 —— 這個要跑好幾小時，不該每天自動跑。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "先選 test 驗一下（1 分鐘），沒問題再選 full"
+        type: choice
+        options: [test, full]
+        default: test
+      start_date:
+        description: "要補到哪一年（full 才有用）"
+        default: "2021-01-01"
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350        # 上限 6 小時，留一點餘裕
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 抓下來的歷史很大（五年約 110 MB），不進 repo，放在 Actions 的快取裡。
+      # 下次再跑會先還原，已經抓好的就跳過，所以第二次會快很多。
+      - name: 還原上次抓好的歷史
+        uses: actions/cache@v4
+        with:
+          path: data/stock
+          key: finmind-hist-${{ inputs.start_date }}-${{ github.run_id }}
+          restore-keys: |
+            finmind-hist-${{ inputs.start_date }}-
+            finmind-hist-
+
+      - name: 測試（只抓 3 檔、不寫檔）
+        if: inputs.mode == 'test'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python finmind_backfill.py --test
+
+      - name: 正式補歷史
+        if: inputs.mode == 'full'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python finmind_backfill.py "${{ inputs.start_date }}"
+
+      - name: 重算指標
+        if: inputs.mode == 'full'
+        run: python indicators.py
+
+      - name: 重跑回測
+        if: inputs.mode == 'full'
+        run: python backtest.py --rules
+
+      - name: 產生報告
+        if: inputs.mode == 'full'
+        run: python btreport.py
+
+      # 只 commit 報告，不 commit 原始歷史 —— 那 110 MB 留在快取裡就好，
+      # 進了 repo 之後每次 checkout 都要多下載一次，而且永遠刪不掉。
+      - name: 推回報告
+        if: inputs.mode == 'full'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f backtest.json backtest.html data/daily.txt
+          if git diff --cached --quiet; then
+            echo "沒有變動"
+          else
+            git commit -m "FinMind 補歷史後重跑回測（起始 ${{ inputs.start_date }}）"
+            git pull --rebase
+            git push
+          fi
+
+      - name: 摘要
+        if: inputs.mode == 'full'
+        run: |
+          echo "### 回測重跑完成" >> $GITHUB_STEP_SUMMARY
+          python - <<'EOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          d = json.load(open("backtest.json", encoding="utf-8"))
+          print("樣本期間 %s ~ %s，共 **%d** 個交易日\n" % (d["from"], d["to"], d["days"]))
+          print("| 情境 | 方向 | 20 天超額 | t |")
+          print("|---|---|---|---|")
+          for r in d["rows"]:
+              x = r["h"].get("20")
+              if not x:
+                  continue
+              s = -1 if r["side"] == "空" else 1
+              t = x["t"]
+              print("| %s | %s | %+.2f%% | %s |" % (
+                  r["name"], r["side"], s * x["excess"],
+                  ("%+.1f" % (s * t)) if t is not None else "—"))
+          EOF
