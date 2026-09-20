@@ -36,6 +36,17 @@ import indicators as I
 import chips as C
 
 HORIZONS = [1, 5, 10, 20]
+# 「隔天跳空」當成一個特殊的持有期：訊號日收盤 → 隔天開盤。
+# 盤後選股吃不到這一段，但要知道它有多大 —— 有些條件的價值其實整個在跳空上。
+GAP = "g"
+KEYS = [GAP] + HORIZONS
+
+
+def nw_lag(k):
+    """Newey-West 要修正幾期重疊。跳空不重疊，所以是 1。"""
+    return 1 if k == GAP else k
+
+
 WARMUP = 30          # 算得出 bbWMin10 的最低天數
 MARGIN_MIN_DAYS = 120  # 融資維持率至少要這麼多天的籌碼史才夠可信
 
@@ -352,11 +363,11 @@ def run(limit_days=None, verbose=True):
         eval_days = eval_days[-limit_days:]
 
     # 收集：picks[preset][horizon] = [報酬...]，base[horizon] = [報酬...]
-    picks = {p: {h: [] for h in HORIZONS} for p in PRESETS}
+    picks = {p: {h: [] for h in KEYS} for p in PRESETS}
     counts = {p: [] for p in PRESETS}
     usable = {p: 0 for p in PRESETS}
-    bench = {h: [] for h in HORIZONS}
-    bench_days = {h: [] for h in HORIZONS}   # 每日平均，用來配對比較
+    bench = {h: [] for h in KEYS}
+    bench_days = {h: [] for h in KEYS}   # 每日平均，用來配對比較
     day_bench = {}
 
     pos_in = {code: {d: j for j, d in enumerate(st["dates"])}
@@ -384,12 +395,15 @@ def run(limit_days=None, verbose=True):
             for h in HORIZONS:
                 c1 = st["c"][i + h]
                 fwd[h] = (c1 / entry - 1) * 100 if (entry and entry > 0) else None
+            # 跳空：訊號日收盤 → 隔天開盤。這一段吃不到，但要看得到。
+            c0 = st["c"][i]
+            fwd[GAP] = (entry / c0 - 1) * 100 if (entry and c0 and c0 > 0) else None
             rows.append((code, mkt, base, d, fwd, i))
 
         # 基準：通過流動性門檻（成交金額 ≥ 1 億）的全市場平均
         liq = [r for r in rows if r[2]["valE"] is not None and r[2]["valE"] >= 1]
         bm, bmed = {}, {}
-        for h in HORIZONS:
+        for h in KEYS:
             vals = sorted(r[4][h] for r in liq if r[4][h] is not None)
             if vals:
                 bm[h] = sum(vals) / len(vals)
@@ -425,7 +439,7 @@ def run(limit_days=None, verbose=True):
                 sel = rng.sample(sel, min(spec["_random"], len(sel)))
             n = len(sel)
             for code, mkt, base, d, fwd, i in sel:
-                for h in HORIZONS:
+                for h in KEYS:
                     if fwd[h] is not None:
                         picks[pname][h].append((fwd[h], bm[h], bmed[h], day))
             counts[pname].append(n)
@@ -446,7 +460,7 @@ def summarize(res):
                "days": res["usable"][pname],
                "avg_picks": (sum(cnt) / len(cnt)) if cnt else 0,
                "total_picks": sum(cnt), "h": {}}
-        for h in HORIZONS:
+        for h in KEYS:
             recs = res["picks"][pname][h]
             if not recs:
                 row["h"][h] = None
@@ -479,11 +493,12 @@ def summarize(res):
                 dev = [x - m for x in daily]
                 # Newey-West：持有 h 天的報酬會重疊 h−1 天，相鄰樣本自己就相關，
                 # 不修正的話 t 值會被灌水好幾倍。
+                hl = nw_lag(h)
                 g0 = sum(e * e for e in dev) / nd
                 var = g0
-                for lag in range(1, min(h, nd - 1)):
+                for lag in range(1, min(hl, nd - 1)):
                     g = sum(dev[j] * dev[j - lag] for j in range(lag, nd)) / nd
-                    var += 2 * (1 - lag / h) * g
+                    var += 2 * (1 - lag / hl) * g
                 if var > 0:
                     sd = var ** 0.5
                     t = m / (sd / nd ** 0.5)
@@ -574,7 +589,7 @@ if __name__ == "__main__":
     print()
     print(fmt_table(rows, res))
     out = {"rows": rows,
-           "bench": {str(h): res["bench"][h] for h in HORIZONS},
+           "bench": {str(h): res["bench"][h] for h in KEYS},
            "days": len(res["eval_days"]),
            "from": res["eval_days"][0], "to": res["eval_days"][-1]}
 
