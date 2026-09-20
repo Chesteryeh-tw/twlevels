@@ -22,12 +22,21 @@ HOR = ["1", "5", "10", "20"]
 GAP = "g"
 CONTROL = {"rnd10", "rnd30", "rnd60"}
 
-# 來回交易成本估計（％）。手續費 0.1425% 買賣各一次、打 5 折，加證交稅 0.15%。
-# 當沖證交稅減半算進去大約就是這個數。條件的原始報酬蓋不過這個數，做了也是白做。
-COST = 0.30
+# 來回交易成本（％），只拿來在報告裡標「扣完還剩多少」，**不當標籤的判準**。
+#   當沖（1 天＝隔天開盤進、隔天收盤出）：手續費 3 折來回 0.0855% + 當沖證交稅 0.15%
+#   隔夜以上：手續費 3 折來回 0.0855% + 證交稅 0.3%
+# 折數因券商而異，這裡寫死一組合理值。一個條件成不成立是統計問題，
+# 不該取決於誰的手續費折數 —— 所以成本只出現在說明，不出現在判準裡。
+COST = {"1": 0.235, "5": 0.386, "10": 0.386, "20": 0.386}
 
 # 持有期 → 人話
 SCALE = {"1": "隔日", "5": "一週", "10": "兩週", "20": "波段"}
+
+# 布林位階的四個分區，由強到弱。狀態轉移表用。
+ST = ["貼上軌", "上半部", "下半部", "貼下軌"]
+ST_COL = {"貼上軌": "var(--gain)", "上半部": "var(--gain)",
+          "下半部": "var(--loss)", "貼下軌": "var(--loss)"}
+ST_OP = {"貼上軌": "1", "上半部": ".45", "下半部": ".45", "貼下軌": "1"}
 
 CSS = """
 :root{--bg:#E9EDEF;--surface:#fff;--surface2:#F3F6F7;--sunk:#DFE6EA;--text:#121A1F;
@@ -100,6 +109,14 @@ tr.ctl td.l::before{content:"對照　";font-size:11px;color:var(--muted)}
 .bars{position:relative;display:flex;gap:2px;align-items:flex-start;height:28px;padding-top:1px;width:max-content}
 .bars .zero{position:absolute;left:0;right:0;top:14px;height:1px;background:var(--line);opacity:.8}
 .bars i{display:block;width:9px;border-radius:1px;position:relative;z-index:1}
+/* ── 狀態轉移條 ─────────────────────────────── */
+.stbar{display:flex;height:14px;width:150px;border-radius:3px;overflow:hidden;
+ border:1px solid var(--line2)}
+.stbar i{display:block;height:100%}
+.stcap{font-size:10px;color:var(--muted);margin-top:2px;line-height:1.3}
+.stkey{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:8px}
+.stkey span{display:inline-flex;align-items:center;gap:4px}
+.stkey i{width:11px;height:11px;border-radius:2px;display:inline-block}
 .legend{font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6}
 ul{margin:8px 0 0;padding-left:20px;font-size:13.5px}
 li{margin-bottom:5px}
@@ -176,11 +193,14 @@ def auto_tag(r, is_ctl):
 
     回傳 (標籤文字, css class, 拿來畫長條的持有期, 一句話說明)。
 
-    判準三條，要同時成立：
+    判準只有兩條，而且都是統計問題：
       * t 值撐得住（|t| ≥ 2），代表不是某幾個月運氣好
       * 超額為正，代表贏得過同一天的全市場
-      * 原始報酬蓋得過來回成本 0.3%，代表扣完費用還有剩
-    三條都過不了的就老實說沒過關，不要硬給標籤。
+
+    交易成本刻意**不列入判準**。一個條件是不是真的有效，
+    跟你用哪家券商、折數多少無關；把成本寫進判準，
+    等於改一下手續費假設標籤就整排翻掉，那不合理。
+    成本只在表格裡標成「扣完還剩多少」，讓你自己判斷划不划算。
     """
     if is_ctl:
         return ("對照組", "no", "20", "隨機挑股，本來就不該有標籤。")
@@ -193,7 +213,7 @@ def auto_tag(r, is_ctl):
         t = s * x["t"]
         ex = s * x["excess"]
         raw = s * x["mean"]
-        if t >= 2.0 and ex > 0 and raw > COST:
+        if t >= 2.0 and ex > 0:
             ok.append((h, t, ex, raw))
         if t <= -2.0 and ex < 0:
             if worst is None or t < worst[1]:
@@ -206,9 +226,11 @@ def auto_tag(r, is_ctl):
         extra = ""
         if len(ok) > 1:
             extra = "（%s 也過關，但取最短的）" % "、".join(SCALE[o[0]] for o in ok[1:])
+        net = raw - COST[h]
         return ("%s%s" % (SCALE[h], dirn), "up", h,
-                "隔天開盤進、抱 %s 個交易日，超額 %s、原始 %s，扣掉成本還有剩，t=%+.1f 撐得住。%s"
-                % (h, pct(ex), pct(raw), t, extra))
+                "隔天開盤進、抱 %s 個交易日：超額 %s、t=%+.1f 撐得住。"
+                "原始 %s，扣掉來回成本 %.3f%% 之後約 %s。%s"
+                % (h, pct(ex), t, pct(raw), COST[h], pct(net), extra))
     if worst:
         h, _t, ex, _raw = worst
         return ("反指標（%s）" % SCALE[h], "dn", h,
@@ -236,6 +258,34 @@ def bars(monthly, side, h):
         out.append('<i style="height:%dpx;margin-top:%dpx;background:%s" title="%s　持有 %s 天　做%s %+.2f%%"></i>'
                    % (ht, top, col, m[:4] + "-" + m[4:], h, side, v))
     return '<div class="bars">' + "".join(out) + "</div>"
+
+
+def stbar(states, h):
+    """選出來的股票，h 天後散到布林哪一區。回傳一條堆疊長條。"""
+    if not states:
+        return ""
+    tot = sum(states.values())
+    if tot < 200:          # 樣本太少的分布只是雜訊，不如不畫
+        return ""
+    segs = []
+    for k in ST:
+        v = states.get(k, 0)
+        if not v:
+            continue
+        segs.append('<i style="width:%.2f%%;background:%s;opacity:%s" title="%s %.1f%%"></i>'
+                    % (v / tot * 100, ST_COL[k], ST_OP[k], k, v / tot * 100))
+    down = (states.get("下半部", 0) + states.get("貼下軌", 0)) / tot * 100
+    return ('<div class="stbar">%s</div>'
+            '<div class="stcap">掉到中軌以下 <b>%.0f%%</b></div>'
+            % ("".join(segs), down))
+
+
+def st_key():
+    out = []
+    for k in ST:
+        out.append('<span><i style="background:%s;opacity:%s"></i>%s</span>'
+                   % (ST_COL[k], ST_OP[k], k))
+    return '<div class="stkey">%s</div>' % "".join(out)
 
 
 def cell_vals(r, h, is_ctl):
@@ -326,12 +376,19 @@ def main():
                 '意思是股價跌了、空單賺錢。</dd>')
 
     body.append('<dt>標籤</dt><dd>每個情境該當成隔日單、週單還是波段，'
-                '不是我認定的，是從資料推出來的。要同時滿足三條才給標籤：'
-                '<b>t ≥ 2</b>（穩定出現）、<b>超額為正</b>（贏得過同一天的全市場）、'
-                '<b>原始報酬蓋過來回成本 %.1f%%</b>（扣完費用還有剩）。'
-                '三條都過不了的就標「未達標準」，不硬給。'
-                '<br>標成<span class="tag dn">反指標</span>的意思是：照它的方向做會穩定賠。'
-                '這不是叫你反著做，是叫你別照它進場。</dd>' % COST)
+                '不是我認定的，是從資料推出來的。要同時滿足兩條：'
+                '<b>t ≥ 2</b>（穩定出現）、<b>超額為正</b>（贏得過同一天的全市場）。'
+                '幾個持有期都過關就取<b>最短</b>的——報酬差不多時，抱越久曝險越久。'
+                '<br>兩條都過不了的就標「未達標準」，不硬給。'
+                '標成<span class="tag dn">反指標</span>的意思是：照它的方向做會穩定賠。'
+                '這不是叫你反著做，是叫你別照它進場。</dd>')
+    body.append('<dt>交易成本</dt><dd><b>刻意不列入標籤的判準。</b>'
+                '一個條件是不是真的有效，跟你用哪家券商、折數多少無關；'
+                '把成本寫進判準，改一下假設標籤就整排翻掉，那不合理。'
+                '<br>這裡用的是手續費 3 折來回 0.0855%%，加上證交稅：'
+                '<b>當沖（1 天）%.3f%%</b>、<b>隔夜以上 %.3f%%</b>。'
+                '滑鼠移到標籤上會顯示扣完之後大約剩多少。</dd>'
+                % (COST["1"], COST["20"]))
 
     body.append('<dt>超額</dt><dd>比同一天全市場（成交金額 ≥ 1 億）的平均多賺多少。'
                 '大盤自己在漲的時候做多本來就會賺，減掉才知道是不是條件有用。'
@@ -367,6 +424,14 @@ def main():
                 '整排幾乎全紅＝一路都行；綠的東一根西一根＝只是某幾個月運氣好。</dd>'
                 % (m_from, m_to))
 
+    body.append('<dt>N 天後在布林哪一區</dt><dd>選出來的股票，過了 N 天之後'
+                '散落在布林通道的哪一段——<b>貼上軌／中軌之上／中軌之下／貼下軌</b>。'
+                '紅色是中軌之上，綠色是之下；顏色深的是貼著上下軌的極端。'
+                '<br>這比平均報酬穩定，也更接近你在盤面上實際看到的東西。'
+                '<b>看的是「掉到中軌以下的比例」</b>——那是這筆單走壞掉的機率，'
+                '拿來設停損和決定部位大小，比看平均報酬有用。'
+                '<br>參考值：全市場「貼上軌」的股票，5 天後掉到中軌以下是 15%；'
+                '但如果上軌還在往外開（斜率 > 3%），只有 4.4%；上軌沒在漲的話是 28%。</dd>')
     body.append('<dt>平均檔數</dt><dd>這個情境平均每天選出幾檔。'
                 '<b>檔數少的要特別小心</b> —— 對照組裡「隨機 10 檔」光靠運氣就能跑出 +0.98%、t=+2.3，'
                 '所以一天只選幾檔的情境，數字再漂亮也可能是雜訊。'
@@ -382,6 +447,8 @@ def main():
              '<th class="grp" rowspan="2">隔天<br>跳空</th>')
     for h in HOR:
         head1 += '<th class="grp" colspan="3">持有 %s 天</th>' % h
+    head1 += '<th class="l" rowspan="2">N 天後在布林哪一區<br>' \
+             '<span style="font-weight:400;color:var(--muted)">紅＝中軌之上，綠＝之下</span></th>'
     head1 += '<th class="l" rowspan="2">逐月超額<br>' \
              '<span style="font-weight:400;color:var(--muted)">一根＝一個月，左舊右新</span></th></tr>'
     head2 = "<tr>"
@@ -413,10 +480,13 @@ def main():
             tr += '<td class="num %s">%s<span class="sub2">%s</span></td>' % (exc, ex, raw)
             tr += '<td class="num %s">%s<span class="sub2">%s</span></td>' % (btc, bt, pos)
             tr += '<td><span class="t %s">%s</span></td>' % ("on" if strong else "off", ts)
-        m = (r["h"].get(tag_h) or {}).get("monthly") or {}
-        tr += '<td class="l">%s</td>' % bars(m, r["side"], tag_h)
+        hx = r["h"].get(tag_h) or {}
+        tr += '<td class="l">%s</td>' % stbar(hx.get("states"), tag_h)
+        tr += '<td class="l">%s</td>' % bars(hx.get("monthly") or {}, r["side"], tag_h)
         body.append(tr + "</tr>")
-    body.append("</table></div></div>")
+    body.append("</table></div>")
+    body.append(st_key())
+    body.append("</div>")
 
     # ── 手機：一個情境一張卡 ──────────────────
     body.append('<div class="cards">')
@@ -448,7 +518,12 @@ def main():
                         % (h, mark, exc, ex, raw, btc, bt, pos,
                            "on" if strong else "off", ts))
         body.append("</table>")
-        m = (r["h"].get(tag_h) or {}).get("monthly") or {}
+        hx = r["h"].get(tag_h) or {}
+        sb = stbar(hx.get("states"), tag_h)
+        if sb:
+            body.append('<div class="barwrap"><div class="cap">'
+                        '%s 天後跑到布林哪一區</div>%s</div>' % (tag_h, sb))
+        m = hx.get("monthly") or {}
         if m:
             body.append('<div class="barwrap"><div class="cap">逐月超額（持有 %s 天）・'
                         '一根＝一個月，左舊右新</div>%s</div>' % (tag_h, bars(m, r["side"], tag_h)))

@@ -53,6 +53,45 @@ MARGIN_MIN_DAYS = 120  # 融資維持率至少要這麼多天的籌碼史才夠�
 
 # ---------------------------------------------------------------- 讀資料
 
+STATES = ["貼上軌", "上半部", "下半部", "貼下軌"]
+
+
+def pos_series(c):
+    """每日布林位階（上軌=10、中軌=0、下軌=-10）。前 19 天是 None。
+
+    跟 indicators.boll() 同一套定義，只是改成滾動算，
+    因為狀態轉移要看「未來第 N 天」的位階，一天一天重算會太慢。
+    """
+    n = len(c)
+    out = [None] * n
+    s = s2 = 0.0
+    for i in range(n):
+        s += c[i]
+        s2 += c[i] * c[i]
+        if i >= 20:
+            s -= c[i - 20]
+            s2 -= c[i - 20] * c[i - 20]
+        if i >= 19:
+            m = s / 20
+            var = max(0.0, s2 / 20 - m * m)
+            sd = var ** 0.5
+            up = m + 2 * sd
+            out[i] = ((c[i] - m) / (up - m) * 10) if up > m else 0.0
+    return out
+
+
+def state_of(p):
+    if p is None:
+        return None
+    if p >= 8:
+        return "貼上軌"
+    if p > 0:
+        return "上半部"
+    if p > -8:
+        return "下半部"
+    return "貼下軌"
+
+
 def load_stocks():
     """code -> dict(dates, o, h, l, c, lot, wan)，皆由舊到新。"""
     out = {}
@@ -79,7 +118,8 @@ def load_stocks():
             lot.append(T.pn(p[5]) or 0.0)
             wan.append(T.pn(p[6]))
         if len(c) >= WARMUP + max(HORIZONS):
-            out[code] = dict(dates=dates, o=o, h=h, l=l, c=c, lot=lot, wan=wan)
+            out[code] = dict(dates=dates, o=o, h=h, l=l, c=c, lot=lot, wan=wan,
+                             pos=pos_series(c))
     return out
 
 
@@ -124,6 +164,7 @@ def chip_row(code, di, days, cache, price_hist, mkt, cost_cache):
         "mgn": mgn,
         "mgnChg": (mgn - mgn_prev) if (mgn is not None and mgn_prev is not None) else None,
         "sr": (shrt / mgn * 100) if (shrt is not None and mgn and mgn > 0) else None,
+        "dlrH": cur.get("dlrHedge"),
         "mgnRate": None,
     }
     # 融資維持率：要往回看一段才估得出平均成本，歷史不夠長就不給
@@ -198,6 +239,28 @@ PRESETS = {
     "c6": ("融資斷頭壓力", "空", dict(val=1, mr2=130, slope2=0)),
     "c7": ("下跌但融資大減", "多", dict(val=1, mr1=160, chg2=0, mgnc2=-100)),
     "hot": ("高週轉高振幅", "—", dict(val=1, turn=10, amp=5)),
+    # ── 這一批是照講義補的，之前漏掉或做反了 ──────────────────
+    # s1：教材「上通斜率 > 3，超級強勢股，若要空只能短空」。
+    #     我原本把 supt:3 當成全面避開，等於把這個條件整個擋掉。
+    #     拆解測試顯示：空它 1 天原始 +0.62%（t=+2.4），空一個月 -5.26%。
+    #     教材是對的，所以這裡把它單獨拉出來測，而且刻意不設持有期限制，
+    #     讓報告自己標出「只能短空」。
+    "s1": ("強勢股隔日空", "空", dict(val=1, lot=1000, supt2=3)),
+    # b4：教材「上通斜率在高點、沿著布林上軌 ＝ 強勢上漲發動中」。
+    #     跟 b1（擠壓→剛打開）是兩件事：b1 抓發動那一天，b4 抓發動中。
+    #     狀態轉移統計：這批股票 5 天內掉到中軌以下只有 4.4%，
+    #     上軌沒在漲的那組是 22.4%。差 5 倍。
+    "b4": ("貼上軌強勢走", "多", dict(val=1, bpos1=8, supt2=3)),
+    # c8：教材分兩句，我原本只做了第二句。
+    #     「第一天大買，隔天一早容易有追價買盤」← 短線／跳空
+    #     「連買時適合偏多操作」← 波段（這句是既有的 c2）
+    #     投信不能當沖，買了就是波段，所以第一天的追價是乾淨的。
+    "c8": ("投信首日大買", "多", dict(val=1, invd=1, invd2=1, inv=300)),
+    # c9：教材「自營避險買超通常跟權證有關。若權證買超的是隔日沖分點，
+    #     隔天早盤（十點前）容易有權證賣壓 → 容易小殺」。
+    #     這是現有資料裡最接近「分點主力」的東西，之前完全沒用過。
+    #     門檻 3% 大約落在全市場 95 百分位。
+    "c9": ("自營避險大買", "空", dict(val=1, lot=1000, dlr=3)),
     # 對照組：同樣的流動性門檻，但隨機挑 30 檔。
     # 這一列的超額報酬必須接近 0、t 值必須接近 0，否則就是量測方法本身有偏差，
     # 上面每一列都不能信。這是整份回測的體溫計。
@@ -207,7 +270,7 @@ PRESETS = {
 }
 CONTROL = {"rnd10", "rnd30", "rnd60"}
 
-NEED_CHIP = {"c2", "c4", "c5", "c6", "c7"}
+NEED_CHIP = {"c2", "c4", "c5", "c6", "c7", "c8", "c9"}
 NEED_MA240 = {"p4", "p6"}
 
 # 拆解測試：不是測「情境」，是把講義裡單獨一條規則拉出來，跟它的相反面比。
@@ -289,12 +352,24 @@ def passes(s, base, d, k):
     if g("rundn") is not None and d["runDn"] < g("rundn"):
         return False
 
-    if any(g(x) is not None for x in ("invd", "inv", "invs", "fgn", "fgnd",
-                                      "sr", "mgnc1", "mgnc2", "mr1", "mr2")):
+    if any(g(x) is not None for x in ("invd", "invd2", "inv", "invs", "fgn", "fgnd",
+                                      "sr", "mgnc1", "mgnc2", "mr1", "mr2", "dlr")):
         if k is None:
             return False
         if g("invd") is not None and k["invD"] < g("invd"):
             return False
+        # invd2：連買天數上限。invd=1 且 invd2=1 就是「投信今天才開始買」——
+        # 講義說追價效應在第一天最明顯，跟「連買好幾天」是兩件事。
+        if g("invd2") is not None and k["invD"] > g("invd2"):
+            return False
+        # dlr：自營避險買超佔當日成交量的百分比。
+        # 講義「自避」＝自營避險買超/成交量，跟權證有關。
+        if g("dlr") is not None:
+            dh = k.get("dlrH")
+            if dh is None or not base["lot"] or base["lot"] <= 0:
+                return False
+            if dh / base["lot"] * 100 < g("dlr"):
+                return False
         if g("inv") is not None and (k["inv"] is None or k["inv"] < g("inv")):
             return False
         if g("invs") is not None and (k["inv"] is None or k["inv"] > -g("invs")):
@@ -366,6 +441,8 @@ def run(limit_days=None, verbose=True):
     picks = {p: {h: [] for h in KEYS} for p in PRESETS}
     counts = {p: [] for p in PRESETS}
     usable = {p: 0 for p in PRESETS}
+    # 狀態轉移：選出來的股票，N 天後跑到布林的哪一區
+    states = {p: {h: defaultdict(int) for h in HORIZONS} for p in PRESETS}
     bench = {h: [] for h in KEYS}
     bench_days = {h: [] for h in KEYS}   # 每日平均，用來配對比較
     day_bench = {}
@@ -398,7 +475,7 @@ def run(limit_days=None, verbose=True):
             # 跳空：訊號日收盤 → 隔天開盤。這一段吃不到，但要看得到。
             c0 = st["c"][i]
             fwd[GAP] = (entry / c0 - 1) * 100 if (entry and c0 and c0 > 0) else None
-            rows.append((code, mkt, base, d, fwd, i))
+            rows.append((code, mkt, base, d, fwd, i, st))
 
         # 基準：通過流動性門檻（成交金額 ≥ 1 億）的全市場平均
         liq = [r for r in rows if r[2]["valE"] is not None and r[2]["valE"] >= 1]
@@ -418,7 +495,7 @@ def run(limit_days=None, verbose=True):
         di = chip_idx.get(day)
         krows = {}
         if di is not None:
-            for code, mkt, base, d, fwd, i in rows:
+            for code, mkt, base, d, fwd, i, st in rows:
                 if base["valE"] is None or base["valE"] < 1:
                     continue
                 k = chip_row(code, di, chip_ds, chip_cache, price_hist, mkt, None)
@@ -438,10 +515,16 @@ def run(limit_days=None, verbose=True):
                 rng = random.Random("%s|%d" % (day, spec.get("_seed", 0)))
                 sel = rng.sample(sel, min(spec["_random"], len(sel)))
             n = len(sel)
-            for code, mkt, base, d, fwd, i in sel:
+            for code, mkt, base, d, fwd, i, st in sel:
                 for h in KEYS:
                     if fwd[h] is not None:
                         picks[pname][h].append((fwd[h], bm[h], bmed[h], day))
+                for h in HORIZONS:
+                    j = i + h
+                    if j < len(st["pos"]):
+                        s1 = state_of(st["pos"][j])
+                        if s1:
+                            states[pname][h][s1] += 1
             counts[pname].append(n)
             usable[pname] += 1
 
@@ -449,7 +532,7 @@ def run(limit_days=None, verbose=True):
             print("  %d/%d 天 …" % (dn_i + 1, len(eval_days)))
 
     return dict(picks=picks, counts=counts, usable=usable, bench=bench,
-                eval_days=eval_days, n_stocks=len(stocks))
+                states=states, eval_days=eval_days, n_stocks=len(stocks))
 
 
 def summarize(res):
@@ -513,7 +596,9 @@ def summarize(res):
             row["h"][h] = dict(n=n, mean=mean_r, median=med, win=win,
                                excess=mean_e, beat=beat,
                                t=t, sd_daily=sd, n_days=len(daily),
-                               pos_days=pos_days, monthly=monthly)
+                               pos_days=pos_days, monthly=monthly,
+                               states=dict(res["states"][pname].get(h, {}))
+                               if h in HORIZONS else None)
         out.append(row)
     return out
 
