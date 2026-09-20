@@ -36,8 +36,13 @@ import twse as T
 
 API = "https://api.finmindtrade.com/api/v4/data"
 
-# 每次請求之間隔多久。600/hr = 6.0 秒，抓 6.2 留一點餘裕。
-PAUSE = 6.2
+# 每次請求之間隔多久。
+# 上限 600/hr 換算是 6.0 秒，但貼著上限跑很危險 —— 對方的計數方式可能是
+# 滑動視窗，或把別的請求也算進來，一旦被擋就會連續失敗、觸發下面的停止保護。
+# 7.0 秒 = 514/hr，留 14% 餘裕，代價只是多半小時。
+PAUSE = 7.0
+# 被限流的時候等多久再重試。不計入失敗次數，因為這不是錯誤，只是要等。
+RATE_WAIT = 90
 # 預設補到幾年前。五年約 110 MB、1250 個交易日。
 DEFAULT_START = "2021-01-01"
 # 連續失敗幾次就停下來，不要悶著頭跑三小時跑出一堆空檔
@@ -79,8 +84,13 @@ def fetch(code, start, end, token):
     except Exception as e:
         print("    %s 連線失敗：%s" % (code, e))
         return None
-    if body.get("status") != 200:
-        print("    %s API 回 %s：%s" % (code, body.get("status"), body.get("msg")))
+    st = body.get("status")
+    if st != 200:
+        msg = str(body.get("msg") or "")
+        # 402 是 FinMind 的「超過流量」。其他帶 limit/request 字樣的也當作限流。
+        if st in (402, 429) or "limit" in msg.lower() or "request" in msg.lower():
+            return "RATE"
+        print("    %s API 回 %s：%s" % (code, st, msg))
         return None
     return body.get("data") or []
 
@@ -206,8 +216,9 @@ def main():
         codes = codes[:limit]
 
     print("要補 %d 檔，從 %s 到 %s" % (len(codes), start, end))
-    print("每 %.1f 秒一個請求，預估 %.1f 小時。中途可以中斷，重跑會接著做。"
-          % (PAUSE, len(codes) * PAUSE / 3600))
+    print("每 %.1f 秒一個請求（約 %.0f 次/小時，上限 600），預估 %.1f 小時。"
+          "中途可以中斷，重跑會接著做。"
+          % (PAUSE, 3600 / PAUSE, len(codes) * PAUSE / 3600))
 
     os.makedirs(T.STOCK_DIR, exist_ok=True)
     done = skipped = failed = added = 0
@@ -221,6 +232,19 @@ def main():
 
         rows = fetch(code, start, end, token)
         time.sleep(PAUSE)
+
+        # 被限流就等一下再試同一檔，最多等三輪。這不算失敗 ——
+        # 算成失敗的話連續幾次就會觸發停止保護，整晚白跑。
+        for _ in range(3):
+            if rows != "RATE":
+                break
+            print("  碰到流量上限，等 %d 秒再試 %s" % (RATE_WAIT, code))
+            time.sleep(RATE_WAIT)
+            rows = fetch(code, start, end, token)
+            time.sleep(PAUSE)
+        if rows == "RATE":
+            print("  等了三輪還是被擋，先停下來。等一小時之後重跑，已抓好的不會重抓。")
+            break
 
         if rows is None:
             failed += 1
