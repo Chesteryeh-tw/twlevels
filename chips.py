@@ -57,6 +57,11 @@ def day_path(dstr):
     return os.path.join(CHIP_DIR, dstr + ".txt")
 
 
+# 一個正常交易日，全市場大約有 1900~2000 檔有融資餘額。
+# 低於這個數就代表證交所那份還沒出，寫出來的是半套檔。
+MIN_MARGIN_ROWS = 500
+
+
 def have_day(dstr, min_ratio=0.9):
     """這天的籌碼抓齊了沒。
 
@@ -72,7 +77,14 @@ def have_day(dstr, min_ratio=0.9):
     if not keep:
         return True                 # 沒有 market.txt 可比對，就不多管
     hit = sum(1 for c in rows if c in keep)
-    return hit >= len(keep) * min_ratio
+    if hit < len(keep) * min_ratio:
+        return False
+    # 光看「每檔都有一列」不夠。三大法人 16:00 就出了，融資融券要更晚；
+    # 太早跑的話會寫出一個「有法人、沒融資」的半套檔，而舊版只看列數就跳過，
+    # 那天的融資資料永遠補不回來 —— 2026-09-21 就是這樣掛的。
+    # 所以這裡再檢查融資欄位實際有值的檔數。
+    with_mgn = sum(1 for r in rows.values() if r.get("mgn") is not None)
+    return with_mgn >= MIN_MARGIN_ROWS
 
 
 def write_day(dstr, rows):
@@ -585,17 +597,36 @@ def run_latest():
     if len(ds) != 8:
         print("meta.json 沒有資料日。")
         return 0
+    # 先回頭看最近 5 個已經抓過的日子有沒有半套的（通常是融資融券還沒出就跑了），
+    # 有的話補抓。不補的話那幾天的融資維持率、券資比會永遠是空的。
+    fixed = 0
+    for old in chip_days()[-5:]:
+        if old == ds or have_day(old):
+            continue
+        d0 = datetime(int(old[:4]), int(old[4:6]), int(old[6:]), tzinfo=T.TPE)
+        print("補抓 %s（之前只抓到一半）..." % old)
+        r0 = fetch_chip_day(d0)
+        if r0 and sum(1 for r in r0.values() if r.get("mgn") is not None) >= MIN_MARGIN_ROWS:
+            write_day(old, r0)
+            print("  補回 %d 檔" % len(r0))
+            fixed += 1
+        else:
+            print("  還是沒有融資資料，下次再試。")
+
     if have_day(ds):
         print("籌碼 %s 已經抓齊，不重抓。" % ds)
-        return 0
+        return fixed
     day = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:]), tzinfo=T.TPE)
     print("抓 %s 的籌碼 ..." % ds)
     rows = fetch_chip_day(day)
     if not rows:
         print("  四個來源都沒給資料（可能還沒出檔）。")
-        return 0
+        return fixed
+    n_mgn = sum(1 for r in rows.values() if r.get("mgn") is not None)
     write_day(ds, rows)
-    print("  %d 檔" % len(rows))
+    print("  %d 檔（其中 %d 檔有融資資料）" % (len(rows), n_mgn))
+    if n_mgn < MIN_MARGIN_ROWS:
+        print("  ⚠ 融資融券還沒出檔，這天先算半套，明天會自動補。")
     return len(rows)
 
 
