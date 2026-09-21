@@ -14,8 +14,12 @@
   1900 檔 × 6.2 秒 ≈ 3.3 小時。
 
 可以中斷重跑
-  每檔抓完就立刻寫檔，而且會先看本地已經有什麼日期。
-  已經涵蓋到 START_DATE 的就跳過，所以中途斷掉再跑一次就好，不會重抓。
+  每檔抓完就立刻寫檔，並且把「這檔已經從哪一天補過」記進 data/stock/_covered.json。
+  下次再跑，記錄裡已經涵蓋到 START_DATE 的就跳過，中途斷掉再跑一次也不會重抓。
+
+  （舊版是拿「本地最舊日期 <= 起始日」當判準，但起始日通常給 1/1 這種休市日，
+   最舊日期不可能等於那天，條件永遠不成立 —— 等於每次都把 1900 檔重抓一遍。
+   2026-09-21 的兩次 Actions 各白跑約 4 小時就是這個原因。）
 
 Token
   從環境變數 FINMIND_TOKEN 讀。GitHub Actions 走 Secrets，
@@ -31,6 +35,7 @@ from datetime import datetime
 import urllib.request
 import urllib.parse
 import json
+from datetime import timedelta
 
 import twse as T
 
@@ -48,6 +53,16 @@ DEFAULT_START = "2021-01-01"
 # 連續失敗幾次就停下來，不要悶著頭跑三小時跑出一堆空檔
 MAX_FAILS = 10
 REPORT_EVERY = 25
+
+# 「這檔已經從哪一天補過」的紀錄。放在 data/stock/ 底下，
+# 這樣它會跟歷史檔一起被 Actions 的快取存下來、下次一起還原。
+# 副檔名是 .json，indicators.py 和 backtest.py 掃目錄時只收 .txt，不會被誤讀。
+COVER_FILE = os.path.join(T.STOCK_DIR, "_covered.json")
+# 還沒有紀錄時（第一次跑修正版）的寬限天數。
+# 起始日給 2021-01-01，實際第一個交易日是 1/4；再加上農曆年前後的休市，
+# 抓到的最舊日期跟起始日差個幾天到幾週是正常的，不該當成「沒抓過」。
+# 90 天夠寬，又不至於把 2021 年中才上市的新股誤判成已涵蓋。
+COVER_SLACK_DAYS = 90
 
 
 def read_token():
@@ -145,13 +160,50 @@ def to_line(row):
     return d, "%s,%s,%s,%s,%s,%d,%d" % (d, f(o), f(h), f(l), f(c), lot, wan)
 
 
-def already_covered(code, start):
-    """本地已經有的資料是不是已經涵蓋到 start。有的話就不用再抓。"""
+def load_cover():
+    """讀「已經補到哪一天」的紀錄。壞掉或不存在都當成空的，重抓而已，不會錯。"""
+    try:
+        with open(COVER_FILE, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_cover(cov):
+    """先寫暫存再換名，中途被砍不會留下半個壞掉的 json。"""
+    try:
+        os.makedirs(T.STOCK_DIR, exist_ok=True)
+        tmp = COVER_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cov, fh)
+        os.replace(tmp, COVER_FILE)
+    except Exception as e:
+        print("  （紀錄檔寫不進去：%s，不影響資料本身）" % e)
+
+
+def already_covered(code, start, cov):
+    """本地已經有的資料是不是已經涵蓋到 start。有的話就不用再抓。
+
+    兩道判斷：
+      1. 紀錄檔說這檔之前就是從 start（或更早）抓的 —— 明確跳過。
+      2. 還沒有紀錄（第一次跑修正版，或紀錄掉了）—— 看最舊日期，
+         落在 start 之後 COVER_SLACK_DAYS 天以內就算數。
+         這一條是為了讓快取裡已經抓好的 1337 天直接生效，不用再抓一輪。
+    """
     ser = T.read_stock(code)
     if not ser:
         return False, {}
+    rec = cov.get(code)
+    if rec and rec <= start:
+        return True, ser
+    s = start.replace("-", "")
     oldest = min(ser.keys())
-    return oldest <= start.replace("-", ""), ser
+    if oldest <= s:
+        return True, ser
+    limit = (datetime.strptime(s, "%Y%m%d")
+             + timedelta(days=COVER_SLACK_DAYS)).strftime("%Y%m%d")
+    return oldest <= limit, ser
 
 
 def selftest(token):
@@ -215,20 +267,34 @@ def main():
     if limit:
         codes = codes[:limit]
 
-    print("要補 %d 檔，從 %s 到 %s" % (len(codes), start, end))
-    print("每 %.1f 秒一個請求（約 %.0f 次/小時，上限 600），預估 %.1f 小時。"
-          "中途可以中斷，重跑會接著做。"
-          % (PAUSE, 3600 / PAUSE, len(codes) * PAUSE / 3600))
+    print("全市場 %d 檔，要補到 %s ~ %s" % (len(codes), start, end))
 
     os.makedirs(T.STOCK_DIR, exist_ok=True)
+    cov = load_cover()
     done = skipped = failed = added = 0
     fails_in_a_row = 0
 
-    for n, code in enumerate(codes, 1):
-        covered, ser = already_covered(code, start)
+    # 先把要抓的挑出來再開始，這樣一開頭就知道實際要跑多久，
+    # 而不是等跑完才發現「其實全部都跳過了」或「其實全部都重抓了」。
+    todo = []
+    for code in codes:
+        covered, _ = already_covered(code, start, cov)
         if covered:
             skipped += 1
-            continue
+        else:
+            todo.append(code)
+    print("已經補過、跳過 %d 檔；實際要抓 %d 檔，"
+          "每 %.1f 秒一個請求（約 %.0f 次/小時，上限 600），預估 %.1f 小時。"
+          "中途可以中斷，重跑會接著做。"
+          % (skipped, len(todo), PAUSE, 3600 / max(PAUSE, 0.001),
+             len(todo) * PAUSE / 3600))
+    if not todo:
+        print("全部都已經補齊，直接收工。")
+        save_cover(cov)
+        return
+
+    for n, code in enumerate(todo, 1):
+        ser = T.read_stock(code)
 
         rows = fetch(code, start, end, token)
         time.sleep(PAUSE)
@@ -266,13 +332,21 @@ def main():
             T.write_stock(code, ser)
             added += new
         done += 1
+        # 抓成功就記一筆。就算這檔沒有新資料（本來就抓齊了）也要記 ——
+        # 重點是「已經向 FinMind 問過這個區間」，下次不必再問。
+        if cov.get(code, "9999-99-99") > start:
+            cov[code] = start
+        if done % REPORT_EVERY == 0:
+            save_cover(cov)
 
         if n % REPORT_EVERY == 0:
-            left = (len(codes) - n) * PAUSE / 60
+            left = (len(todo) - n) * PAUSE / 60
             print("  %d/%d　已補 %d 檔、新增 %d 天、跳過 %d、失敗 %d"
                   "　剩約 %.0f 分鐘"
-                  % (n, len(codes), done, added, skipped, failed, left))
+                  % (n, len(todo), done, added, skipped, failed, left))
 
+    # 不管是跑完、被限流中斷、還是連續失敗停下，都要把進度存起來。
+    save_cover(cov)
     print("結束：補了 %d 檔、新增 %d 個交易日、跳過 %d 檔、失敗 %d 檔"
           % (done, added, skipped, failed))
     if failed:
