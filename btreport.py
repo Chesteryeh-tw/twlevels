@@ -104,6 +104,9 @@ tr.ctl td.l::before{content:"對照　";font-size:11px;color:var(--muted)}
  border:1px solid currentColor;font-weight:600}
 .tag.up{color:var(--gain)} .tag.dn{color:var(--loss)}
 .tag.no{color:var(--muted);border-color:var(--line);font-weight:400}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.net{display:inline-block;font-size:11px;margin-left:5px;white-space:nowrap;
+ font-family:"IBM Plex Mono",ui-monospace,monospace}
 
 /* ── 逐月長條 ───────────────────────────────── */
 .bars{position:relative;display:flex;gap:2px;align-items:flex-start;height:28px;padding-top:1px;width:max-content}
@@ -173,6 +176,14 @@ def cls(v):
     return "good" if v > 0.05 else ("bad" if v < -0.05 else "dim")
 
 
+def net_cls(v):
+    """淨報酬的顏色。門檻比一般數字寬 —— 0.07% 這種數字實質上就是零，
+    染成紅色會讓人以為有賺。滑價、零股湊整、掛單沒成交都不只這個數。"""
+    if v is None:
+        return "dim"
+    return "good" if v > 0.15 else ("bad" if v < -0.15 else "dim")
+
+
 def beat_cls(beat, is_ctl):
     """贏過中位數的分界是 50%，不是 0。"""
     if is_ctl or beat is None:
@@ -191,7 +202,11 @@ def pct(v):
 def auto_tag(r, is_ctl):
     """從回測資料推出這個條件該怎麼用。
 
-    回傳 (標籤文字, css class, 拿來畫長條的持有期, 一句話說明)。
+    回傳 (標籤文字, css class, 拿來畫長條的持有期, 一句話說明, 淨報酬或 None)。
+
+    **淨報酬是這裡最重要的一個數字。** t 值高只代表「穩定贏過大盤」，
+    不代表賺錢 —— 大盤漲 1.1%、這檔只漲 0.6%，做空它「超額 +0.5%」
+    但實際上賠 0.6%。這種情況要當場標出來，不然 t=+4.8 會害人。
 
     判準只有兩條，而且都是統計問題：
       * t 值撐得住（|t| ≥ 2），代表不是某幾個月運氣好
@@ -203,7 +218,7 @@ def auto_tag(r, is_ctl):
     成本只在表格裡標成「扣完還剩多少」，讓你自己判斷划不划算。
     """
     if is_ctl:
-        return ("對照組", "no", "20", "隨機挑股，本來就不該有標籤。")
+        return ("對照組", "no", "20", "隨機挑股，本來就不該有標籤。", None)
     s = sgn(r["side"])
     ok, worst = [], None
     for h in HOR:
@@ -227,18 +242,26 @@ def auto_tag(r, is_ctl):
         if len(ok) > 1:
             extra = "（%s 也過關，但取最短的）" % "、".join(SCALE[o[0]] for o in ok[1:])
         net = raw - COST[h]
+        # 統計上過關，但扣完成本實際是賠的 —— 這種要另外標，不能給正面標籤
+        if net <= 0:
+            return ("贏大盤但賠錢", "warn", h,
+                    "抱 %s 天超額 %s、t=%+.1f，統計上確實穩定贏過大盤——"
+                    "但原始報酬只有 %s，扣掉成本 %.3f%% 之後是 %s。"
+                    "它漲得比大盤少，不代表做空它會賺。"
+                    "這種條件適合當「不要碰」的濾網，不適合直接進場。"
+                    % (h, pct(ex), t, pct(raw), COST[h], pct(net)))
         return ("%s%s" % (SCALE[h], dirn), "up", h,
                 "隔天開盤進、抱 %s 個交易日：超額 %s、t=%+.1f 撐得住。"
-                "原始 %s，扣掉來回成本 %.3f%% 之後約 %s。%s"
-                % (h, pct(ex), t, pct(raw), COST[h], pct(net), extra))
+                "原始 %s，扣掉來回成本 %.3f%% 之後淨賺約 %s。%s"
+                % (h, pct(ex), t, pct(raw), COST[h], pct(net), extra), net)
     if worst:
         h, _t, ex, _raw = worst
         return ("反指標（%s）" % SCALE[h], "dn", h,
                 "照這個方向做，抱 %s 個交易日平均輸大盤 %s，而且是穩定發生的。"
-                "這不是叫你反著做，是叫你別照它進場。" % (h, pct(-ex)))
+                "這不是叫你反著做，是叫你別照它進場。" % (h, pct(-ex)), None)
     return ("未達標準", "no", "20",
-            "四個持有期都沒有同時滿足「t ≥ 2、超額為正、原始報酬蓋過成本」。"
-            "數字再漂亮也可能是雜訊。")
+            "四個持有期都沒有同時滿足「t ≥ 2」和「超額為正」。"
+            "數字再漂亮也可能是雜訊。", None)
 
 
 # ---------------------------------------------------------------- 儲存格
@@ -250,14 +273,20 @@ def bars(monthly, side, h):
     s = sgn(side)
     items = [(m, v * s) for m, v in monthly.items()]
     mx = max(abs(v) for _, v in items) or 1
+    # 月份數會隨樣本長度變 —— 一年 12 根、五年 67 根。
+    # 固定 9px 的話五年就撐爆手機畫面，所以照根數反推寬度，讓整條維持在 ~270px。
+    n = len(items)
+    bw = 9 if n <= 20 else max(2, int(270 / n) - 1)
+    gap = 2 if n <= 20 else 1
     out = ['<span class="zero"></span>']
     for m, v in items:
         ht = max(2, round(abs(v) / mx * 13))
         top = 14 - ht if v > 0 else 15
         col = "var(--gain)" if v > 0 else "var(--loss)"
-        out.append('<i style="height:%dpx;margin-top:%dpx;background:%s" title="%s　持有 %s 天　做%s %+.2f%%"></i>'
-                   % (ht, top, col, m[:4] + "-" + m[4:], h, side, v))
-    return '<div class="bars">' + "".join(out) + "</div>"
+        out.append('<i style="width:%dpx;height:%dpx;margin-top:%dpx;background:%s"'
+                   ' title="%s　持有 %s 天　做%s %+.2f%%"></i>'
+                   % (bw, ht, top, col, m[:4] + "-" + m[4:], h, side, v))
+    return '<div class="bars" style="gap:%dpx">%s</div>' % (gap, "".join(out))
 
 
 def stbar(states, h):
@@ -382,6 +411,16 @@ def main():
                 '<br>兩條都過不了的就標「未達標準」，不硬給。'
                 '標成<span class="tag dn">反指標</span>的意思是：照它的方向做會穩定賠。'
                 '這不是叫你反著做，是叫你別照它進場。</dd>')
+    body.append('<dt>⚠ 贏大盤 ≠ 賺錢</dt><dd>'
+                '<b>這是整份報告最容易害人的地方。</b>'
+                '超額是「比大盤多賺多少」，但大盤自己在漲的時候，'
+                '一檔<b>漲得比大盤少</b>的股票，超額是正的、做空它卻還是賠錢。'
+                '<br>「反彈放空點」就是這樣：抱 20 天超額 +0.56%、t=+4.8（全報告最高），'
+                '但原始報酬是 <b>−0.58%</b>——股票其實漲了，空它照樣賠。'
+                '<br>所以標籤旁邊一定會附一個<b>「淨」</b>：原始報酬扣掉來回成本之後'
+                '真正進口袋的數字。<b>淨是綠的（負的），就代表這個條件不能拿來直接進場</b>，'
+                '只能當「不要碰」的濾網。那種情況標籤會變成'
+                '<span class="tag warn">贏大盤但賠錢</span>。</dd>')
     body.append('<dt>交易成本</dt><dd><b>刻意不列入標籤的判準。</b>'
                 '一個條件是不是真的有效，跟你用哪家券商、折數多少無關；'
                 '把成本寫進判準，改一下假設標籤就整排翻掉，那不合理。'
@@ -433,8 +472,10 @@ def main():
                 '<br>參考值：全市場「貼上軌」的股票，5 天後掉到中軌以下是 15%；'
                 '但如果上軌還在往外開（斜率 > 3%），只有 4.4%；上軌沒在漲的話是 28%。</dd>')
     body.append('<dt>平均檔數</dt><dd>這個情境平均每天選出幾檔。'
-                '<b>檔數少的要特別小心</b> —— 對照組裡「隨機 10 檔」光靠運氣就能跑出 +0.98%、t=+2.3，'
-                '所以一天只選幾檔的情境，數字再漂亮也可能是雜訊。'
+                '<b>檔數少的要特別小心</b> —— 檔數越少，每天的平均越容易被一兩檔飆股帶著走。'
+                '在只有一年樣本的時候，「隨機 10 檔」曾經光靠運氣跑出 +0.98%、t=+2.3；'
+                '樣本拉長之後那個數字塌回 +0.07%、t=+0.6。'
+                '<b>所以一天只選幾檔、而且樣本天數又短的情境，數字再漂亮也先不要信。</b>'
                 '<br>另外，同一天選出的股票很可能是<b>同一個族群</b>，'
                 '38 檔不等於 38 個機會，這一點本站目前還看不出來。</dd>')
 
@@ -460,10 +501,16 @@ def main():
 
     for r in rows:
         is_ctl = r["key"] in CONTROL
-        tag, tcls, tag_h, tag_why = tags[r["key"]]
+        tag, tcls, tag_h, tag_why, tag_net = tags[r["key"]]
         tr = '<tr class="ctl">' if is_ctl else "<tr>"
         tr += '<td class="l">%s</td>' % r["name"]
-        tr += '<td class="l"><span class="tag %s" title="%s">%s</span></td>' % (tcls, tag_why, tag)
+        net_html = ""
+        if tag_net is not None:
+            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本。'
+                        '絕對值小於 0.15%% 就當作沒賺 —— 滑價就不只這個數。">'
+                        '淨 %s</span>' % (net_cls(tag_net), pct(tag_net)))
+        tr += '<td class="l"><span class="tag %s" title="%s">%s</span>%s</td>' % (
+            tcls, tag_why, tag, net_html)
         tr += '<td><span class="side">%s</span></td>' % r["side"]
         tr += '<td class="num">%.1f</td><td class="num">%d</td>' % (r["avg_picks"], r["days"])
         g = gap_cell(r, is_ctl)
@@ -492,10 +539,16 @@ def main():
     body.append('<div class="cards">')
     for r in rows:
         is_ctl = r["key"] in CONTROL
-        tag, tcls, tag_h, tag_why = tags[r["key"]]
+        tag, tcls, tag_h, tag_why, tag_net = tags[r["key"]]
         body.append('<div class="pc%s">' % (" ctl" if is_ctl else ""))
-        body.append('<div class="hd"><b>%s</b><span class="tag %s">%s</span>'
-                    '<span class="side">%s</span></div>' % (r["name"], tcls, tag, r["side"]))
+        net_html = ""
+        if tag_net is not None:
+            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本。'
+                        '絕對值小於 0.15%% 就當作沒賺 —— 滑價就不只這個數。">'
+                        '淨 %s</span>' % (net_cls(tag_net), pct(tag_net)))
+        body.append('<div class="hd"><b>%s</b><span class="tag %s" title="%s">%s</span>%s'
+                    '<span class="side">%s</span></div>'
+                    % (r["name"], tcls, tag_why, tag, net_html, r["side"]))
         g = gap_cell(r, is_ctl)
         gtxt = ("・隔天跳空 %s" % g[0]) if g else ""
         body.append('<div class="meta">平均 %.1f 檔／天・%d 天%s</div>'
