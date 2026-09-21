@@ -4,7 +4,9 @@ on:
   schedule:
     # 08:00 UTC = 台北時間 16:00，週一到週五
     # GitHub 的排程尖峰時可能延後幾十分鐘，屬正常
-    - cron: '0 8 * * 1-5'
+    # 16:00 台北跑的話，三大法人出了、融資融券還沒，會寫出半套檔。
+    # 改成 18:00 台北（10:00 UTC）。就算還是太早，chips.py 現在會自己補。
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:        # 也可以在網頁上手動按「Run workflow」
 
 permissions:
