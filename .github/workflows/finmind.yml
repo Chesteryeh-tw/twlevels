@@ -31,10 +31,10 @@ jobs:
       # 抓下來的歷史很大（五年約 110 MB），不進 repo，放在 Actions 的快取裡。
       # 下次再跑會先還原，已經抓好的就跳過，所以第二次會快很多。
       - name: 還原上次抓好的歷史
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/stock
-          key: finmind-hist-${{ inputs.start_date }}-${{ github.run_id }}
+          key: finmind-hist-${{ inputs.start_date }}-
           restore-keys: |
             finmind-hist-${{ inputs.start_date }}-
             finmind-hist-
@@ -50,6 +50,15 @@ jobs:
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python finmind_backfill.py "${{ inputs.start_date }}"
+
+      # 抓完馬上存，不要等整個 job 成功。
+      # 上一次就是因為最後一步失敗，cache 的 post 步驟被跳過，3.7 小時的下載全白費。
+      - name: 立刻把抓好的歷史存進快取
+        if: always() && inputs.mode == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: data/stock
+          key: finmind-hist-${{ inputs.start_date }}-${{ github.run_id }}
 
       - name: 重算指標
         if: inputs.mode == 'full'
@@ -75,9 +84,25 @@ jobs:
             echo "沒有變動"
           else
             git commit -m "FinMind 補歷史後重跑回測（起始 ${{ inputs.start_date }}）"
-            git pull --rebase
+            # --autostash：補完歷史之後 data/stock 底下上千個檔案都被改過但沒 commit，
+            # 一般的 pull --rebase 碰到未提交的變動會直接拒絕。autostash 會先收起來、
+            # rebase 完再放回去 —— 不能用 checkout 丟掉，那些檔案還要留給快取保存。
+            git pull --rebase --autostash
             git push
           fi
+
+      # 就算前面哪一步失敗，也把已經算好的東西存成 artifact，
+      # 不要讓幾小時的計算跟著一起消失。
+      - name: 失敗時也把結果留下來
+        if: failure() && inputs.mode == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-output
+          path: |
+            backtest.json
+            backtest.html
+            data/daily.txt
+          if-no-files-found: warn
 
       - name: 摘要
         if: inputs.mode == 'full'
