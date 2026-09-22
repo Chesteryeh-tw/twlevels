@@ -12,6 +12,8 @@
   3. 套上 index.html 裡每個情境的條件，拿到當天的入選名單。
   4. 往後看 1/5/10/20 個交易日的報酬，跟「同一天所有通過流動性門檻的股票」
      的平均比較 —— 大盤本來就在漲的時候，選股會跟著漲，不減掉就是自欺欺人。
+  5. `--exits` 另外跑一份「條件出場」：不抱固定天數，照講義的方式賣
+     （離開上軌的黑K、跌破月線、第五日出清）。詳見下面「條件出場」那一段。
 
 沒辦法測的
   * 集保大戶／散戶／戶數：data/tdcc 只有一期，沒有歷史 → c1、c3 跳過。
@@ -56,14 +58,17 @@ MARGIN_MIN_DAYS = 120  # 融資維持率至少要這麼多天的籌碼史才夠�
 STATES = ["貼上軌", "上半部", "下半部", "貼下軌"]
 
 
-def pos_series(c):
-    """每日布林位階（上軌=10、中軌=0、下軌=-10）。前 19 天是 None。
+def boll_series(c):
+    """每日的 (月線, 上軌, 下軌, 位階)，前 19 天是 None。
 
-    跟 indicators.boll() 同一套定義，只是改成滾動算，
-    因為狀態轉移要看「未來第 N 天」的位階，一天一天重算會太慢。
+    跟 indicators.boll() 同一套定義（母體標準差），只是改成滾動算。
+    狀態轉移和條件出場都要看「未來第 N 天」的布林，一天一天重算會太慢。
     """
     n = len(c)
-    out = [None] * n
+    ma = [None] * n
+    up = [None] * n
+    lo = [None] * n
+    pos = [None] * n
     s = s2 = 0.0
     for i in range(n):
         s += c[i]
@@ -75,9 +80,11 @@ def pos_series(c):
             m = s / 20
             var = max(0.0, s2 / 20 - m * m)
             sd = var ** 0.5
-            up = m + 2 * sd
-            out[i] = ((c[i] - m) / (up - m) * 10) if up > m else 0.0
-    return out
+            ma[i] = m
+            up[i] = m + 2 * sd
+            lo[i] = m - 2 * sd
+            pos[i] = ((c[i] - m) / (up[i] - m) * 10) if up[i] > m else 0.0
+    return ma, up, lo, pos
 
 
 def state_of(p):
@@ -118,8 +125,9 @@ def load_stocks():
             lot.append(T.pn(p[5]) or 0.0)
             wan.append(T.pn(p[6]))
         if len(c) >= WARMUP + max(HORIZONS):
+            ma20, bbup, bblo, pos = boll_series(c)
             out[code] = dict(dates=dates, o=o, h=h, l=l, c=c, lot=lot, wan=wan,
-                             pos=pos_series(c))
+                             pos=pos, ma20=ma20, bbUp=bbup, bbLo=bblo)
     return out
 
 
@@ -342,6 +350,183 @@ RULES = [
 ]
 
 
+# ---------------------------------------------------------------- 條件出場
+#
+# 固定抱 1/5/10/20 天測的不是講義在講的東西。講義的出場全是條件式的：
+#   「離開布林上軌的黑K 是短線賣點」「跌破月線時就出場」「第五日出清」
+# 這一段就是讓回測可以照那樣出場。
+#
+# 時間軸（跟進場同一套誠實標準）：
+#   訊號日 i 收盤看到 → 第 i+1 天開盤買進
+#   之後每天收盤檢查出場條件 → 觸發當天收盤 (retC) 與觸發隔天開盤 (retO) 都記
+#   retO 是實際做得到的（盤後才看得到黑K），retC 是上限參考。
+#
+# 出場條件（EXIT 規格）
+#   maxd      最多抱幾個交易日，到了就強制出清（講義「第五日出清」用這個）
+#   leaveup   多方：離開上軌的黑K。值是位階門檻（8 ＝ 貼上軌）
+#             要先「貼過上軌」才算數 —— 沒貼過就談不上離開，
+#             否則像開布林那種進場當天位階才 +2 的，第一天就會被判出場。
+#   leavelo   空方鏡像：離開下軌的紅K
+#   belowma   多方：收盤跌破月線就走     abovema  空方：收盤站上月線就回補
+#   belowpos  多方：位階跌破這個值就走   （空方自動鏡像成「位階站上 −值」）
+#   stop/take 停損／停利，用收盤價判（日線看不到盤中，所以不能假裝停在停損價）
+#
+# 判定順序：停損停利 → 離開軌道 → 月線 → 位階 → 到期。
+# 只看收盤，因為這是盤後工具，盤中資料我們沒有。
+
+MAXD_CAP = 20
+
+
+def exit_scan(st, i, side, ex):
+    """從訊號日 i 出發，走到出場為止。回 dict 或 None（資料不夠）。
+
+    n = 持有交易日數（進場日算第 1 天），出場判定日是 i+n。
+    """
+    c, o = st["c"], st["o"]
+    ma, pos = st["ma20"], st["pos"]
+    a = i + 1
+    entry = o[a] if a < len(o) else None
+    if not entry or entry <= 0:
+        return None
+    maxd = min(ex.get("maxd", MAXD_CAP), MAXD_CAP)
+    long_ = (side != "空")
+    band = ex.get("leaveup") if long_ else ex.get("leavelo")
+
+    # 「離開上軌」要先貼過上軌。訊號日本身就貼著的話，一進場就算貼過。
+    armed = False
+    if band is not None and pos[i] is not None:
+        armed = (pos[i] >= band) if long_ else (pos[i] <= -band)
+
+    for n in range(1, maxd + 1):
+        j = i + n
+        if j + 1 >= len(c):
+            return None
+        pc, po, px = c[j], o[j], pos[j]
+        if pc is None or pc <= 0:
+            return None
+        reason = None
+
+        ret_now = (pc / entry - 1) * 100
+        pnl = ret_now if long_ else -ret_now
+        if ex.get("stop") is not None and pnl <= ex["stop"]:
+            reason = "停損"
+        elif ex.get("take") is not None and pnl >= ex["take"]:
+            reason = "停利"
+
+        if reason is None and band is not None and px is not None:
+            if armed:
+                if long_ and px < band and po is not None and pc < po:
+                    reason = "離開上軌黑K"
+                elif (not long_) and px > -band and po is not None and pc > po:
+                    reason = "離開下軌紅K"
+            if reason is None:
+                if (px >= band) if long_ else (px <= -band):
+                    armed = True
+
+        if reason is None and ma[j] is not None:
+            if long_ and ex.get("belowma") and pc < ma[j]:
+                reason = "跌破月線"
+            elif (not long_) and ex.get("abovema") and pc > ma[j]:
+                reason = "站上月線"
+
+        if reason is None and ex.get("belowpos") is not None and px is not None:
+            lim = ex["belowpos"]
+            if long_ and px < lim:
+                reason = "位階跌破"
+            elif (not long_) and px > -lim:
+                reason = "位階站上"
+
+        if reason is None and n >= maxd:
+            reason = "到期"
+
+        if reason:
+            nxt = o[j + 1]
+            if not nxt or nxt <= 0:
+                return None
+            # 同一筆單「不設條件、抱滿 maxd 天」會是多少 —— 用來回答
+            # 「這個出場規則到底有沒有加分」。跟大盤比會被持有天數的選擇效應污染：
+            # 抱 2 天就跑的那些，本來就是走壞的那些，拿去跟「隨便一檔抱 2 天」比，
+            # 本來就會輸。要判斷出場規則好不好，只能跟同一筆單抱滿比。
+            jf = i + maxd
+            fc = c[jf] if jf < len(c) else None
+            fo = o[jf + 1] if (jf + 1) < len(o) else None
+            return dict(n=n, reason=reason,
+                        retC=(pc / entry - 1) * 100,
+                        retO=(nxt / entry - 1) * 100,
+                        fullC=((fc / entry - 1) * 100) if (fc and fc > 0) else None,
+                        fullO=((fo / entry - 1) * 100) if (fo and fo > 0) else None)
+    return None
+
+
+# (標籤, 方向, 進場條件, 出場條件)
+# 進場條件的欄位跟 PRESETS 一模一樣，差別只在出場。
+EXIT_PRESETS = {
+    # 講義 p179 的完整戰法：壓縮 → 帶量開布林進場 → 離開上軌黑K賣。
+    # 固定天數測出來是反指標，但那是「抱滿 N 天」；這裡才是講義真正在說的做法。
+    "x1": ("開布林→離開上軌黑K賣", "多",
+           dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5, wmin=10, bwy=15),
+           dict(leaveup=8, maxd=20)),
+    # 目前唯一長樣本驗證會賺錢的條件，換成條件出場看能不能更好。
+    "x2": ("貼上軌強勢走→離開上軌黑K賣", "多",
+           dict(val=1, bpos1=8, supt2=3),
+           dict(leaveup=8, maxd=20)),
+    "x2b": ("貼上軌強勢走→跌破月線賣", "多",
+            dict(val=1, bpos1=8, supt2=3),
+            dict(belowma=True, maxd=20)),
+    "x2s": ("貼上軌強勢走→離開上軌黑K賣＋停損7%", "多",
+            dict(val=1, bpos1=8, supt2=3),
+            dict(leaveup=8, stop=-7, maxd=20)),
+    # 講義 p201-204 高檔出貨股放空術：乖離年線 > 30%、第一日反彈 > 3%，
+    # 第二日進場，第五日出清。這是講義裡唯一有明確持有期的策略。
+    "x3": ("高檔出貨股放空術（5日出清）", "空",
+           dict(val=1, lot=1000, bias1=30, chg1=3),
+           dict(maxd=5)),
+    "x3m": ("高檔出貨股放空術（跌破月線前先回補）", "空",
+            dict(val=1, lot=1000, bias1=30, chg1=3),
+            dict(abovema=True, maxd=5)),
+    # 講義空方：「跌破月線時就出場」的反面 —— 空單站上月線就回補。
+    "x4": ("反彈放空點→站上月線回補", "空",
+           dict(val=1, slope2=0, bpos1=0, supt=3),
+           dict(abovema=True, maxd=20)),
+    # 籌碼類（只有 247 天，不能跟上面比）
+    "x5": ("投信認養股→跌破月線賣", "多",
+           dict(val=1, invd=3, slope1=0, bpos1=0),
+           dict(belowma=True, maxd=20)),
+    # ── 對照與校驗 ────────────────────────────────────────────
+    # 對照組：隨機 30 檔，但套上「一模一樣的出場規則」。
+    #
+    # 為什麼每一種出場規則都要有自己的對照組：出場條件本身就是一個壞日子
+    # （「離開上軌的黑K」就是當天收黑）。一筆單在第 n 天因為黑K出場，
+    # 拿去跟「同一天進場、同樣抱 n 天的全市場平均」比，本來就會輸 ——
+    # 大盤那個平均沒有「最後一天必須收黑」這個條件。
+    # 這個偏誤有多大，就是對照組那一列的數字。
+    # **所以每一列要看的不是它自己的超額，是它跟同一種出場規則的對照組差多少。**
+    "xr": ("　對照：隨機30→離開上軌黑K賣", "多",
+           dict(val=1, _random=30, _seed=7),
+           dict(leaveup=8, maxd=20)),
+    "xr2": ("　對照：隨機30→跌破月線賣", "多",
+            dict(val=1, _random=30, _seed=8),
+            dict(belowma=True, maxd=20)),
+    "xr3": ("　對照：隨機30空→站上月線回補", "空",
+            dict(val=1, _random=30, _seed=9),
+            dict(abovema=True, maxd=20)),
+    "xr4": ("　對照：隨機30空→固定抱5天", "空",
+            dict(val=1, _random=30, _seed=10),
+            dict(maxd=5)),
+    "xr5": ("　對照：隨機30空→站上月線回補（5天上限）", "空",
+            dict(val=1, _random=30, _seed=11),
+            dict(abovema=True, maxd=5)),
+    # xchk5：出場規則只有「到期」，maxd=5。這一列的原始報酬必須跟主表
+    #        「貼上軌強勢走」的 5 天幾乎一樣 —— 用來證明新路徑沒算錯。
+    "xchk5": ("校驗：貼上軌強勢走 固定抱5天", "多",
+              dict(val=1, bpos1=8, supt2=3),
+              dict(maxd=5)),
+}
+EXIT_CONTROL = {"xr", "xr2", "xr3", "xr4", "xr5"}
+EXIT_NEED_CHIP = {"x5"}
+EXIT_NEED_MA240 = {"x3", "x3m"}
+
+
 def passes(s, base, d, k):
     """base = 當天的價量衍生；d = 指標；k = 籌碼。回 True 表示入選。"""
     g = s.get   # 底線開頭的 key（例如 _random）不是篩選條件，下面都不會去讀
@@ -456,7 +641,7 @@ def base_metrics(st, i, kshares):
     }
 
 
-def run(limit_days=None, verbose=True):
+def run(limit_days=None, verbose=True, exits=None):
     stocks = load_stocks()
     info = load_market_meta()
     chip_ds, chip_cache = load_chip_days()
@@ -476,6 +661,12 @@ def run(limit_days=None, verbose=True):
               % (len(stocks), len(all_days), all_days[0], all_days[-1], len(chip_ds)))
 
     max_h = max(HORIZONS)
+    maxd = 0
+    if exits:
+        maxd = max(min(ex.get("maxd", MAXD_CAP), MAXD_CAP)
+                   for (_l, _s, _e, ex) in exits.values())
+        # 條件出場最遠要看到「出場判定日的隔天開盤」，所以比 maxd 多一天
+        max_h = max(max_h, maxd + 1)
     eval_days = all_days[WARMUP:len(all_days) - max_h]
     if limit_days:
         eval_days = eval_days[-limit_days:]
@@ -489,6 +680,11 @@ def run(limit_days=None, verbose=True):
     bench = {h: [] for h in KEYS}
     bench_days = {h: [] for h in KEYS}   # 每日平均，用來配對比較
     day_bench = {}
+
+    # 條件出場的收集：每一筆是一次進出
+    xtrades = {p: [] for p in (exits or {})}
+    xcounts = {p: [] for p in (exits or {})}
+    xusable = {p: 0 for p in (exits or {})}
 
     pos_in = {code: {d: j for j, d in enumerate(st["dates"])}
               for code, st in stocks.items()}
@@ -534,6 +730,38 @@ def run(limit_days=None, verbose=True):
                 bm[h] = bmed[h] = None
         day_bench[day] = bm
 
+        # 條件出場的基準：持有天數每一筆都不一樣，不能跟固定 N 天的基準比。
+        # 所以對 n = 1..maxd 各算一組「同一天、同樣從隔天開盤進、抱 n 天」的
+        # 全市場平均與中位數 —— 一筆單抱幾天，就跟那個 n 的基準比。
+        bmN = {"C": {}, "O": {}}
+        bmedN = {"C": {}, "O": {}}
+        if exits:
+            ents = []
+            for r in liq:
+                st_, i_ = r[6], r[5]
+                e_ = st_["o"][i_ + 1]
+                if e_ and e_ > 0:
+                    ents.append((st_, i_, e_))
+            for n in range(1, maxd + 1):
+                vc, vo = [], []
+                for st_, i_, e_ in ents:
+                    j_ = i_ + n
+                    cj = st_["c"][j_]
+                    if cj and cj > 0:
+                        vc.append((cj / e_ - 1) * 100)
+                    oj = st_["o"][j_ + 1]
+                    if oj and oj > 0:
+                        vo.append((oj / e_ - 1) * 100)
+                for tag, vals in (("C", vc), ("O", vo)):
+                    if not vals:
+                        bmN[tag][n] = bmedN[tag][n] = None
+                        continue
+                    vals.sort()
+                    bmN[tag][n] = sum(vals) / len(vals)
+                    m_ = len(vals)
+                    bmedN[tag][n] = (vals[m_ // 2] if m_ % 2
+                                     else (vals[m_ // 2 - 1] + vals[m_ // 2]) / 2)
+
         # 籌碼（只在需要時算，很貴）
         di = chip_idx.get(day)
         krows = {}
@@ -571,11 +799,35 @@ def run(limit_days=None, verbose=True):
             counts[pname].append(n)
             usable[pname] += 1
 
+        for pname, (label, side, spec, ex) in (exits or {}).items():
+            if pname in EXIT_NEED_CHIP and di is None:
+                continue
+            if pname in EXIT_NEED_MA240 and not has240:
+                continue
+            sel = [r for r in rows
+                   if not (pname in EXIT_NEED_MA240 and r[3].get("biasY") is None)
+                   and passes(spec, r[2], r[3], krows.get(r[0]))]
+            if spec.get("_random"):
+                rng = random.Random("%s|%d" % (day, spec.get("_seed", 0)))
+                sel = rng.sample(sel, min(spec["_random"], len(sel)))
+            xcounts[pname].append(len(sel))
+            xusable[pname] += 1
+            for code, mkt, base, d, fwd, i, st in sel:
+                t_ = exit_scan(st, i, side, ex)
+                if t_ is None:
+                    continue
+                n_ = t_["n"]
+                xtrades[pname].append((t_["retC"], bmN["C"].get(n_), bmedN["C"].get(n_),
+                                       t_["retO"], bmN["O"].get(n_), bmedN["O"].get(n_),
+                                       n_, t_["reason"], day,
+                                       t_["fullC"], t_["fullO"]))
+
         if verbose and (dn_i + 1) % 25 == 0:
             print("  %d/%d 天 …" % (dn_i + 1, len(eval_days)))
 
     return dict(picks=picks, counts=counts, usable=usable, bench=bench,
-                states=states, eval_days=eval_days, n_stocks=len(stocks))
+                states=states, eval_days=eval_days, n_stocks=len(stocks),
+                xtrades=xtrades, xcounts=xcounts, xusable=xusable)
 
 
 def summarize(res):
@@ -646,6 +898,180 @@ def summarize(res):
     return out
 
 
+COST_DAY = 0.235     # 當沖來回成本
+COST_OVERNIGHT = 0.386   # 隔夜來回成本
+
+
+def nw_t(daily, hl):
+    """每日平均序列的 t 值，Newey-West 修正 hl 期重疊。天數不足 20 不給。"""
+    nd = len(daily)
+    if nd < 20:
+        return None
+    m = sum(daily) / nd
+    dev = [x - m for x in daily]
+    var = sum(e * e for e in dev) / nd
+    for lag in range(1, min(hl, nd - 1)):
+        g = sum(dev[j] * dev[j - lag] for j in range(lag, nd)) / nd
+        var += 2 * (1 - lag / hl) * g
+    if var <= 0:
+        return None
+    return m / ((var ** 0.5) / nd ** 0.5)
+
+
+def summarize_exits(res, exits):
+    """條件出場的統計。跟固定持有期同一套規矩：
+    超額比同一天同樣抱 n 天的全市場平均、贏過比中位數、t 用每日平均＋Newey-West。
+    """
+    out = []
+    for pname, (label, side, spec, ex) in exits.items():
+        recs = res["xtrades"][pname]
+        cnt = res["xcounts"][pname]
+        row = {"key": pname, "name": label, "side": side, "exit": exit_label(ex),
+               "days": res["xusable"][pname],
+               "avg_picks": (sum(cnt) / len(cnt)) if cnt else 0,
+               "trades": len(recs)}
+        if not recs:
+            row["hold"] = None
+            row["conv"] = {}
+            out.append(row)
+            continue
+        sign = -1 if side == "空" else 1
+        holds = [r[6] for r in recs]
+        row["hold"] = sum(holds) / len(holds)
+        row["hold_med"] = sorted(holds)[len(holds) // 2]
+        rc = defaultdict(int)
+        for r in recs:
+            rc[r[7]] += 1
+        row["reasons"] = {k: v for k, v in sorted(rc.items(), key=lambda x: -x[1])}
+        row["conv"] = {}
+        for tag, ri, bi, mi, fi in (("O", 3, 4, 5, 10), ("C", 0, 1, 2, 9)):
+            rets = [r[ri] for r in recs]
+            exc = [r[ri] - r[bi] for r in recs if r[bi] is not None]
+            beatm = [1 if r[ri] > r[mi] else 0 for r in recs if r[mi] is not None]
+            n = len(rets)
+            mean_r = sum(rets) / n
+            # 成本：當天收盤出場而且只抱一天＝當沖，其他都是隔夜
+            costs = [COST_DAY if (tag == "C" and r[6] == 1) else COST_OVERNIGHT
+                     for r in recs]
+            cost = sum(costs) / len(costs)
+            hl = max(1, int(row["hold"] + 0.999))   # 重疊期＝平均持有天數
+            by_day = defaultdict(list)
+            for r in recs:
+                if r[bi] is not None:
+                    by_day[r[8]].append(r[ri] - r[bi])
+            daily = [sum(v) / len(v) for _, v in sorted(by_day.items())]
+            t = nw_t(daily, hl)
+
+            # 配對比較：同一筆單，條件出場 vs 抱滿 maxd 天。
+            # 這才是「出場規則有沒有加分」的答案 —— 跟大盤比會被持有天數的
+            # 選擇效應污染（提早跑的本來就是走壞的那些）。
+            by_day_d = defaultdict(list)
+            dl = []
+            for r in recs:
+                if r[fi] is not None:
+                    dl.append(sign * (r[ri] - r[fi]))
+                    by_day_d[r[8]].append(sign * (r[ri] - r[fi]))
+            vs_hold = (sum(dl) / len(dl)) if dl else None
+            dailyd = [sum(v) / len(v) for _, v in sorted(by_day_d.items())]
+            t_vs_hold = nw_t(dailyd, hl)
+
+            srt = sorted(rets)
+            med = srt[n // 2] if n % 2 else (srt[n // 2 - 1] + srt[n // 2]) / 2
+            row["conv"][tag] = dict(
+                n=n, mean=mean_r, median=med,
+                win=sum(1 for r in rets if sign * r > 0) / n * 100,
+                excess=(sum(exc) / len(exc)) if exc else None,
+                beat=(sum(beatm) / len(beatm) * 100) if beatm else None,
+                t=t, n_days=len(daily), cost=cost,
+                net=sign * mean_r - cost,
+                vs_hold=vs_hold, t_vs_hold=t_vs_hold)
+        out.append(row)
+    return out
+
+
+def exit_label(ex):
+    bits = []
+    if ex.get("leaveup") is not None:
+        bits.append("離開上軌黑K")
+    if ex.get("leavelo") is not None:
+        bits.append("離開下軌紅K")
+    if ex.get("belowma"):
+        bits.append("跌破月線")
+    if ex.get("abovema"):
+        bits.append("站上月線")
+    if ex.get("belowpos") is not None:
+        bits.append("位階 < %g" % ex["belowpos"])
+    if ex.get("stop") is not None:
+        bits.append("停損 %g%%" % ex["stop"])
+    if ex.get("take") is not None:
+        bits.append("停利 %g%%" % ex["take"])
+    bits.append("最多 %d 天" % min(ex.get("maxd", MAXD_CAP), MAXD_CAP))
+    return "、".join(bits)
+
+
+def fmt_exit_table(rows):
+    lines = []
+    lines.append("進場＝訊號隔天開盤。之後每天收盤檢查出場條件，觸發就出場。")
+    lines.append("「隔天開」＝條件觸發的隔天開盤賣（盤後才看得到，這是做得到的）。")
+    lines.append("「當天收」＝觸發當天收盤就賣（做不到，當上限參考）。")
+    lines.append("超額＝同一天、同樣抱 n 天的全市場平均；贏過＝比同條件的中位數。")
+    lines.append("淨＝原始 − 來回成本。空方的數字都是「做空」的角度。")
+    lines.append("")
+    lines.append("⚠ 超額不能單獨看。出場條件本身就是一個壞日子（黑K），")
+    lines.append("  所以每一列的超額天生就偏低。要看的是它跟「同一種出場規則的對照組」差多少 ——")
+    lines.append("  對照組就是最底下那幾列，隨機挑 30 檔套一模一樣的出場規則。")
+    lines.append("")
+    head = ("%-32s %-3s %5s %6s %5s │ %-42s │ %-22s"
+            % ("情境（出場方式）", "方向", "天數", "筆數", "平均抱",
+               "隔天開：原始／超額／贏過／t／淨", "當天收：原始／超額／t"))
+    lines.append(head)
+    lines.append("─" * 135)
+    for r in rows:
+        if not r["conv"]:
+            lines.append("%-32s %-3s     —" % (r["name"], r["side"]))
+            continue
+        sign = -1 if r["side"] == "空" else 1
+        o, c = r["conv"]["O"], r["conv"]["C"]
+
+        def cell(x, full):
+            if x["excess"] is None:
+                return "—"
+            s = "%+6.2f%% %+6.2f%%" % (sign * x["mean"], sign * x["excess"])
+            if full:
+                s += " %5.1f%%" % (x["beat"] if sign > 0 else 100 - x["beat"])
+            s += " t%s" % (("%+5.1f" % (sign * x["t"])) if x["t"] is not None else "  —  ")
+            if full:
+                s += " 淨%+6.2f%%" % x["net"]
+            return s
+        lines.append("%-32s %-3s %5d %6d %5.1f │ %-42s │ %-22s"
+                     % (r["name"], r["side"], r["days"], r["trades"], r["hold"],
+                        cell(o, True), cell(c, False)))
+    lines.append("")
+    lines.append("出場規則到底有沒有加分？同一筆單，條件出場 vs 抱滿上限天數（隔天開盤價）")
+    lines.append("  （提早出場＝暴露在市場裡的時間變短，多頭期間光這件事就會讓這欄變負，")
+    lines.append("    所以一樣要跟對照組那幾列比，不是看它自己是正是負。）")
+    for r in rows:
+        if not r["conv"]:
+            continue
+        x = r["conv"]["O"]
+        if x["vs_hold"] is None:
+            continue
+        lines.append("  %-32s %+6.2f%%  t%s   （抱滿＝%d 天）"
+                     % (r["name"], x["vs_hold"],
+                        ("%+5.1f" % x["t_vs_hold"]) if x["t_vs_hold"] is not None else "  —  ",
+                        min(EXIT_PRESETS[r["key"]][3].get("maxd", MAXD_CAP), MAXD_CAP)
+                        if r["key"] in EXIT_PRESETS else 0))
+    lines.append("")
+    lines.append("出場原因分布")
+    for r in rows:
+        if r.get("reasons"):
+            tot = sum(r["reasons"].values())
+            bits = "　".join("%s %.0f%%" % (k, v / tot * 100)
+                             for k, v in r["reasons"].items())
+            lines.append("  %-30s %s" % (r["name"], bits))
+    return "\n".join(lines)
+
+
 def fmt_table(rows, res):
     lines = []
     bench_avg = {h: (sum(res["bench"][h]) / len(res["bench"][h]) if res["bench"][h] else None)
@@ -712,7 +1138,8 @@ if __name__ == "__main__":
             limit = int(a)
     here = os.path.dirname(os.path.abspath(__file__))
 
-    res = run(limit_days=limit)
+    want_exits = "--exits" in args
+    res = run(limit_days=limit, exits=EXIT_PRESETS if want_exits else None)
     rows = summarize(res)
     print()
     print(fmt_table(rows, res))
@@ -720,6 +1147,13 @@ if __name__ == "__main__":
            "bench": {str(h): res["bench"][h] for h in KEYS},
            "days": len(res["eval_days"]),
            "from": res["eval_days"][0], "to": res["eval_days"][-1]}
+
+    if want_exits:
+        xrows = summarize_exits(res, EXIT_PRESETS)
+        print("\n\n=== 條件出場：照講義的方式賣 ===")
+        print()
+        print(fmt_exit_table(xrows))
+        out["exit_rows"] = xrows
 
     if "--rules" in args:
         print("\n\n=== 拆解測試：一次只動一個條件 ===")
