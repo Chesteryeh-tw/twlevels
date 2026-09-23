@@ -249,7 +249,8 @@ def auto_tag(r, is_ctl):
                     "但原始報酬只有 %s，扣掉成本 %.3f%% 之後是 %s。"
                     "它漲得比大盤少，不代表做空它會賺。"
                     "這種條件適合當「不要碰」的濾網，不適合直接進場。"
-                    % (h, pct(ex), t, pct(raw), COST[h], pct(net)))
+                    % (h, pct(ex), t, pct(raw), COST[h], pct(net)),
+                    net)   # ← 這個 net 以前漏掉，回成 4 元組，一走到這條就整支炸掉
         return ("%s%s" % (SCALE[h], dirn), "up", h,
                 "隔天開盤進、抱 %s 個交易日：超額 %s、t=%+.1f 撐得住。"
                 "原始 %s，扣掉來回成本 %.3f%% 之後淨賺約 %s。%s"
@@ -364,7 +365,17 @@ def main():
     bench = {h: (sum(d["bench"][h]) / len(d["bench"][h])) for h in HOR + [GAP]
              if d["bench"].get(h)}
 
-    tags = {r["key"]: auto_tag(r, r["key"] in CONTROL) for r in rows}
+    # auto_tag 的每一條 return 都必須是 5 元組。少一個的話，錯誤會在 500 行後
+    # 以「not enough values to unpack」爆出來，完全看不出是誰的錯 ——
+    # 2026-09-23 就這樣炸掉一次 12 分鐘的 Actions。在這裡當場擋住。
+    tags = {}
+    for r in rows:
+        t = auto_tag(r, r["key"] in CONTROL)
+        if len(t) != 5:
+            raise SystemExit(
+                "auto_tag('%s') 回傳 %d 個值，應該是 5 個"
+                "（標籤, class, 持有期, 說明, 淨報酬）" % (r["key"], len(t)))
+        tags[r["key"]] = t
 
     # 逐月長條的起訖月份，寫進說明裡，不然沒人知道左右哪邊是新的
     months = []
