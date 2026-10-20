@@ -134,6 +134,16 @@ jobs:
             git push
           fi
 
+      # 點火／破位逐筆清單（給 GPT 複核）。只放 Actions 下載區、保留 30 天，不 commit 進 repo。
+      - name: 點火破位逐筆清單
+        if: always() && inputs.mode == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rally-events
+          path: rally_events.csv
+          retention-days: 30
+          if-no-files-found: warn
+
       # 就算前面哪一步失敗，也把已經算好的東西存成 artifact，
       # 不要讓幾小時的計算跟著一起消失。
       - name: 失敗時也把結果留下來
