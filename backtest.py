@@ -1291,6 +1291,8 @@ RALLY_GROUPS = [
      lambda e: e["yl"] is not None and e["chg"] >= 8.8 and 5.3 <= e["yl"] < 29),
     ("u_reg2", "② 年線下方的點火（距年線 < −2.6%）", "多", "②",
      lambda e: e["yl"] is not None and e["yl"] < -2.6),
+    ("u_yl0", "　參考：距年線 < 0（登記 ② 用的是 < −2.6%，這列不算登記）", "多", "",
+     lambda e: e["yl"] is not None and e["yl"] < 0),
     ("u_chg", "　參考：點火日漲 ≥ 8.8%", "多", "", lambda e: e["chg"] >= 8.8),
     ("u_yl", "　參考：距年線 5.3～29%", "多", "",
      lambda e: e["yl"] is not None and 5.3 <= e["yl"] < 29),
@@ -1327,6 +1329,7 @@ def run_rally(approx=False, verbose=True):
                 cnt[x[0]] += 1
     days = sorted(d for d, n in cnt.items() if n > len(series) * 0.5)
     nxt = {d: days[j + 1] for j, d in enumerate(days[:-1])}
+    cal = {d: j for j, d in enumerate(days)}
 
     bench = defaultdict(lambda: defaultdict(list))
     liquid = defaultdict(lambda: defaultdict(list))   # 當天符合 5,000 萬流動性的報酬（第二把尺）
@@ -1334,11 +1337,28 @@ def run_rally(approx=False, verbose=True):
     for code, r in series.items():
         cl = [x[2] for x in r]
         n = len(r)
+        # 每一列在市場日曆上的位置（不在日曆上的日子給前一個日曆日，只會更保守）
+        ci = [cal.get(x[0], -1) for x in r]
         for i in range(80, n - 1):
             d = r[i][0]
-            if r[i + 1][0] != nxt.get(d) or r[i + 1][1] <= 0:
+            if r[i + 1][0] != nxt.get(d) or r[i + 1][1] <= 0 or ci[i] < 0:
                 continue
-            fw = {k: (r[i + k][2] / r[i + 1][1] - 1) * 100 for k in RALLY_H if i + k < n}
+            # 2026-10-20（GPT 複核）：抱 k 天＝數市場日曆的第 k 個交易日，不是個股第 k 列。
+            # 那天沒成交就用之前最後一個收盤價，並記下空了幾天（stale）。冷門股常有零成交的日子。
+            fw, fx = {}, {}
+            for k in RALLY_H:
+                t = ci[i] + k
+                if t >= len(days):
+                    continue
+                j = i + k if i + k < n else n - 1
+                while j > i + 1 and (ci[j] < 0 or ci[j] > t):
+                    j -= 1
+                while j + 1 < n and 0 <= ci[j + 1] <= t:
+                    j += 1
+                if ci[j] < 0 or ci[j] > t:
+                    continue
+                fw[k] = (r[j][2] / r[i + 1][1] - 1) * 100
+                fx[k] = (r[j][0], days[t], t - ci[j])
             if r[i][3] >= 10000:
                 for k, x in fw.items():
                     bench[d][k].append(x)
@@ -1358,8 +1378,11 @@ def run_rally(approx=False, verbose=True):
                 yl = (cl[i - 1] / (sum(cl[:i]) / i) - 1) * 100
             else:
                 yl = None
-            e = dict(c=code, d=d, fw=fw, yl=yl,
-                     chg=(cl[i] / cl[i - 1] - 1) * 100,
+            # 門檻比較前四捨五入到 6 位：50 → 45.6 剛好 −8.8%，浮點數會算成 −8.7999…（GPT 複核 6127／20260423）
+            e = dict(c=code, d=d, fw=fw, fx=fx, entry=r[i + 1][0],
+                     yl=None if yl is None else round(yl, 6),
+                     ma240_n=240 if i >= 240 else i,
+                     chg=round((cl[i] / cl[i - 1] - 1) * 100, 6),
                      gap=(r[i + 1][1] / cl[i] - 1) * 100)
             if up_:
                 ev["U"].append(e)
@@ -1413,13 +1436,41 @@ def run_rally(approx=False, verbose=True):
             gg = [e for e in g if (a is None or e["d"] >= a) and (b is None or e["d"] <= b)]
             row["periods"].append(dict(name=pl, h={str(k): cell(gg, k, sign) for k in RALLY_H}))
         out.append(row)
+    # 逐筆清單（給 GPT 複核；只放 Actions 下載區，不 commit —— 價格來自 FinMind，不轉散布原始資料）
+    try:
+        import csv as _csv
+        with open("rally_events.csv", "w", newline="", encoding="utf-8-sig") as fh:
+            w = _csv.writer(fh)
+            grp = [g for g in RALLY_GROUPS if g[0] != "ctl"]
+            w.writerow(["方向", "代號", "訊號日", "進場日", "當天漲跌%", "距年線%", "年線天數", "隔天跳空%"]
+                       + sum([["%d天出場日" % k, "%d天目標日" % k, "%d天空了幾天" % k, "%d天報酬%%" % k,
+                               "%d天基準1億%%" % k, "%d天同流動性%%" % k] for k in RALLY_H], [])
+                       + [g[0] for g in grp])
+            for side in ("U", "D"):
+                for e in sorted(ev[side], key=lambda x: (x["d"], x["c"])):
+                    row = ["多" if side == "U" else "空", e["c"], e["d"], e["entry"], "%.6f" % e["chg"],
+                           "" if e["yl"] is None else "%.6f" % e["yl"], e["ma240_n"], "%.4f" % e["gap"]]
+                    for k in RALLY_H:
+                        if k in e["fw"]:
+                            b1, q1 = bench[e["d"]][k], liquid[e["d"]][k]
+                            row += [e["fx"][k][0], e["fx"][k][1], e["fx"][k][2], "%.4f" % e["fw"][k],
+                                    "%.4f" % (sum(b1) / len(b1)) if b1 else "", "%.4f" % (sum(q1) / len(q1)) if q1 else ""]
+                        else:
+                            row += [""] * 6
+                    row += [int((g[2] == ("多" if side == "U" else "空")) and bool(g[4](e))) for g in grp]
+                    w.writerow(row)
+    except OSError as ex:
+        print("逐筆清單寫不出來：%s" % ex)
+    stale = [e["fx"][40][2] for s_ in ("U", "D") for e in ev[s_] if 40 in e.get("fx", {})]
     meta = dict(n_up=len(ev["U"]), n_dn=len(ev["D"]), approx=approx,
+                stale40=sum(1 for x in stale if x > 0), n40=len(stale),
                 first=days[0] if days else None, last=days[-1] if days else None,
                 stocks=len(series), days=len(days))
     if verbose:
         print("點火／破位：股票 %d 檔、交易日 %d 天（%s ~ %s）；點火 %d 筆、破位 %d 筆%s"
               % (len(series), len(days), meta["first"], meta["last"], meta["n_up"], meta["n_dn"],
                  "（距年線用近似）" if approx else ""))
+        print("有 40 天結果 %d 筆，其中出場日當天沒成交、用之前收盤價的 %d 筆" % (meta["n40"], meta["stale40"]))
     return out, meta
 
 
