@@ -47,6 +47,11 @@ jobs:
       - name: 計算技術指標
         run: python indicators.py
 
+      # 分點補抓用：「爆量長紅＋漲停」清單（只用官方價量，可以公開）
+      - name: 爆量長紅＋漲停清單
+        continue-on-error: true
+        run: python limitup_list.py data 20260911
+
       # 以下是籌碼面。任何一段掛掉都不該讓當天的行情更新跟著失敗，
       # 所以都設 continue-on-error —— 隔天排程會自動補上。
       - name: 集保股權分散（每週更新，重複跑會自動略過）
@@ -56,6 +61,19 @@ jobs:
       - name: 三大法人與融資融券
         continue-on-error: true
         run: python chips.py
+
+      - name: 加權指數（大盤開高低收）
+        continue-on-error: true
+        run: python marketidx.py
+
+      - name: 外資持股比率（上市）
+        continue-on-error: true
+        run: python qfii.py
+
+      # 籌碼看板用：把每日籌碼檔轉成「每檔一個檔」，一定要排在 chips.py、qfii.py 之後
+      - name: 每檔籌碼歷史
+        continue-on-error: true
+        run: python chipstock.py data
 
       - name: 有變動就存回倉庫
         run: |

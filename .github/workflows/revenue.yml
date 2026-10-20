@@ -1,0 +1,106 @@
+name: 月營收（公開資訊觀測站）＋ 因子測試
+
+# 目前只能手動跑：先回測，有用才打開每月自動排程（使用者 10-19：沒有用就不放）。
+# 要打開排程時，在下面 on: 加回 schedule: - cron: '30 11 11 * *'（台灣時間每月 11 日 19:30）。
+# 第一次請手動跑：先選 test（約 1 分鐘，只抓 2021-01 上市、上櫃各一份），通過再選 full（約 20 分鐘）。
+# 原始檔只放 Actions 快取，不進 repo（歷史檔的授權範圍還沒確認）；只 commit 統計報告。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "先選 test（1 分鐘），通過再選 full"
+        type: choice
+        options: [test, full]
+        default: test
+
+permissions:
+  contents: write
+
+concurrency:
+  group: revenue
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      MODE: ${{ inputs.mode || 'full' }}    # 之後加排程時，排程觸發沒有 inputs，當 full
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 測試（只抓 2021-01 上市、上櫃各一份，不寫檔）
+        if: env.MODE == 'test'
+        run: python revenue_fetch.py --test
+
+      - name: 還原已抓的月營收
+        if: env.MODE == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+
+      - name: 抓月營收（已驗過的跳過，最近 3 個月重抓）
+        id: fetch
+        if: env.MODE == 'full'
+        continue-on-error: true      # 有幾個月失敗也要先存快取、下面再判斷
+        run: python revenue_fetch.py
+
+      - name: 存進快取
+        if: always() && env.MODE == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-${{ github.run_id }}
+
+      # 因子測試要 2021 起的股價：用 finmind.yml 補好的歷史（沒跑過就只有 repo 裡的近一年）
+      - name: 還原股價歷史
+        if: env.MODE == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: finmind-hist-2021-01-01-
+          restore-keys: |
+            finmind-hist-2021-01-01-
+            finmind-hist-
+
+      - name: 重建營收表、跑因子測試
+        if: env.MODE == 'full'
+        run: |
+          python revenue_fetch.py --panel-only
+          python factor_revenue.py
+
+      # 只 commit 報告。絕對不要改成 git add data/ —— 營收原始檔和 FinMind 股價都不能進 repo。
+      - name: 推回報告
+        if: env.MODE == 'full'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f revenue_report.md revenue_report.json
+          if git diff --cached --quiet; then
+            echo "沒有變動"
+          else
+            git commit -m "月營收因子測試報告"
+            # --autostash：data/stock 被快取還原改過但沒 commit，一般 pull --rebase 會拒絕
+            git pull --rebase --autostash
+            git push
+          fi
+
+      - name: 摘要
+        if: always() && env.MODE == 'full'
+        run: |
+          echo "### 月營收" >> $GITHUB_STEP_SUMMARY
+          [ -f revenue_report.md ] && head -40 revenue_report.md >> $GITHUB_STEP_SUMMARY || echo "沒有報告" >> $GITHUB_STEP_SUMMARY
+
+      - name: 抓取有失敗就標紅
+        if: env.MODE == 'full' && steps.fetch.outcome == 'failure'
+        run: |
+          echo "有月份抓取失敗或被擋，看「抓月營收」那一步的紀錄。已抓到的已存進快取，下次會接著抓。"
+          exit 1

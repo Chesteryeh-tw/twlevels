@@ -16,6 +16,11 @@ on:
 permissions:
   contents: write
 
+# 跟 finmind_chips.yml 共用同一個 FinMind 帳號的流量上限，不要同時跑
+concurrency:
+  group: finmind-api
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -39,6 +44,17 @@ jobs:
             finmind-hist-${{ inputs.start_date }}-
             finmind-hist-
 
+      # finmind_chips.yml 補好的三大法人、融資融券（2021 起）。沒跑過就沒有，回測照舊只用官方的。
+      - name: 還原 FinMind 籌碼快取
+        if: inputs.mode == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/chip_fm
+          key: finmind-chips-${{ inputs.start_date }}-
+          restore-keys: |
+            finmind-chips-${{ inputs.start_date }}-
+            finmind-chips-
+
       - name: 測試（只抓 3 檔、不寫檔）
         if: inputs.mode == 'test'
         env:
@@ -60,17 +76,44 @@ jobs:
           path: data/stock
           key: finmind-hist-${{ inputs.start_date }}-${{ github.run_id }}
 
+      # 官方 data/chip/ 沒有的日子用 FinMind 補（官方優先）。
+      # 補出來的日檔只存在這趟 job 裡：下面的 commit 只加指定的報告檔，
+      # 絕對不要改成 git add data/ —— FinMind 條款不准轉散布原始資料。
+      - name: 併入 FinMind 籌碼歷史
+        if: inputs.mode == 'full'
+        run: python finmind_chips.py --merge
+
+      # revenue.yml 抓好的月營收（給「營收年增 > 0／≤ 0」濾網用）。沒跑過就沒有，那幾組會是 0 筆。
+      - name: 還原月營收快取
+        if: inputs.mode == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+
+      - name: 建月營收表
+        if: inputs.mode == 'full'
+        run: |
+          if [ -f data/revenue_raw/manifest.json ]; then python revenue_fetch.py --panel-only; else echo "沒有月營收快取，略過"; fi
+
       - name: 重算指標
         if: inputs.mode == 'full'
         run: python indicators.py
 
       - name: 重跑回測
         if: inputs.mode == 'full'
-        run: python backtest.py --rules --exits
+        # --rally：點火／破位事件的三個事先登記（研究_起漲與型態 第 5 節），結果在 backtest.json 的 rally_rows
+        run: python backtest.py --rules --exits --rally
 
       - name: 產生報告
         if: inputs.mode == 'full'
         run: python btreport.py
+
+      - name: 回測標籤給主站用
+        if: inputs.mode == 'full'
+        run: python bttags.py
 
       # 只 commit 報告，不 commit 原始歷史 —— 那 110 MB 留在快取裡就好，
       # 進了 repo 之後每次 checkout 都要多下載一次，而且永遠刪不掉。
@@ -79,7 +122,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backtest.json backtest.html data/daily.txt
+          git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json
           if git diff --cached --quiet; then
             echo "沒有變動"
           else
@@ -123,4 +166,17 @@ jobs:
               print("| %s | %s | %+.2f%% | %s |" % (
                   r["name"], r["side"], s * x["excess"],
                   ("%+.1f" % (s * t)) if t is not None else "—"))
+          if d.get("rally_rows"):
+              print("\n#### 點火／破位（40 天，登記驗證期 2021-02～2025-08）\n")
+              print("| 分組 | 筆數 | 超額（≥1億基準）| t | 比同流動性 | t | 淨 |")
+              print("|---|---|---|---|---|---|---|")
+              for r in d["rally_rows"]:
+                  p = [x for x in r["periods"] if x["name"].startswith("登記驗證期")][0]
+                  x = p["h"]["40"]
+                  if "excess" not in x:
+                      print("| %s | %d | — | — | — | — | — |" % (r["name"], x["n"]))
+                      continue
+                  f = lambda v: "—" if v is None else "%+.1f" % v
+                  print("| %s | %d | %+.2f%% | %s | %+.2f%% | %s | %+.2f%% |" % (
+                      r["name"], x["n"], x["excess"], f(x["t"]), x["vs_liq"], f(x["t_liq"]), x["net"]))
           EOF

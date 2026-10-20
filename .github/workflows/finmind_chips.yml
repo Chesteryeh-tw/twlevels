@@ -1,0 +1,64 @@
+name: FinMind 補籌碼歷史（三大法人、融資融券）
+
+# 手動觸發。先選 test（約 1 分鐘）確認跟官方對得上，再選 full。
+# full 一趟最多約 5.5 小時，全部要抓約 7.6 小時，所以要跑兩趟；第二趟會接著抓。
+# 抓好的資料只放 Actions 快取，不進 repo（FinMind 條款不准轉散布原始資料）。
+# 補完之後跑 finmind.yml（mode=full），回測就會用到 2021 起的籌碼。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "先選 test 對帳（1 分鐘），通過再選 full"
+        type: choice
+        options: [test, full]
+        default: test
+      start_date:
+        description: "補到哪一天開始（一律填 2021-01-01，填別的會整批重抓）"
+        default: "2021-01-01"
+
+permissions:
+  contents: read            # 不 commit 任何東西
+
+concurrency:
+  group: finmind-api        # 跟 finmind.yml 共用流量上限，不要同時跑
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 還原上次抓到一半的籌碼
+        uses: actions/cache/restore@v4
+        with:
+          path: data/chip_fm
+          key: finmind-chips-${{ inputs.start_date }}-
+          restore-keys: |
+            finmind-chips-${{ inputs.start_date }}-
+
+      - name: 測試（抓 4 檔跟官方對帳，不寫檔）
+        if: inputs.mode == 'test'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python finmind_chips.py --test
+
+      - name: 正式補（最多 320 分鐘，沒抓完下次接著抓）
+        if: inputs.mode == 'full'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python finmind_chips.py "${{ inputs.start_date }}" --max-minutes=320
+
+      # 不管成功失敗都存，不要讓幾小時的下載白費
+      - name: 存進快取
+        if: always() && inputs.mode == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: data/chip_fm
+          key: finmind-chips-${{ inputs.start_date }}-${{ github.run_id }}
