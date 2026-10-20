@@ -21,6 +21,7 @@
   bbWChg     帶寬變化 = 帶寬(今) − 帶寬(昨)，百分點
              正值＝開口（開布林），負值＝收口
   bbWMin10   前 10 日帶寬的最小值，用來判斷「開布林之前有沒有先壓縮」
+  ampY       前日振幅 % =（前日高 − 前日低）÷ 前前日收盤
              教材：往上帶量開布林是好買點；往下帶量開布林是好空點
   slopeUp    上通斜率 = 上軌(今)/上軌(昨) − 1，百分比　> 3 紅燈
   slopeLo    下通斜率 = 下軌(今)/下軌(昨) − 1，百分比　< −3 綠燈
@@ -39,7 +40,7 @@ import twse as T
 OUT = os.path.join(T.DATA, "daily.txt")
 
 COLS = ("code,ma5,ma20,ma60,ma240,slope20,bbUp,bbLo,bbPos,bbW,"
-        "slopeUp,slopeLo,biasY,runUp,runDn,vr20,vrY,ndays,bbWChg,bbWMin10")
+        "slopeUp,slopeLo,biasY,runUp,runDn,vr20,vrY,ndays,bbWChg,bbWMin10,ampY")
 
 
 def mean(xs):
@@ -124,6 +125,26 @@ def parse_series(series):
     return dates, closes, vols
 
 
+def amp_prev(series):
+    """前日振幅 % =（前日最高 − 前日最低）÷ 前前日收盤 × 100。
+
+    分母用「前一天的昨收」，跟券商軟體與主站今日振幅的算法一致。
+    資料不足或價格缺漏回 None（不是 0）。
+    """
+    ds = sorted(series.keys())
+    if len(ds) < 3:
+        return None
+    try:
+        p1 = series[ds[-2]].split(",")
+        p0 = series[ds[-3]].split(",")
+        h, l, c0 = float(p1[2]), float(p1[3]), float(p0[4])
+    except (ValueError, IndexError):
+        return None
+    if c0 <= 0 or h < l:
+        return None
+    return (h - l) / c0 * 100
+
+
 def compute(closes, vols):
     """回傳一個 dict；資料不足的欄位是 None。"""
     o = {"ndays": len(closes)}
@@ -197,6 +218,7 @@ def line_for(code, o):
         f(o["vr20"]), f(o["vrY"]),
         str(o["ndays"]),
         f(o["bbWChg"], 1), f(o["bbWMin10"], 1),
+        f(o.get("ampY")),
     ])
 
 
@@ -212,13 +234,16 @@ def main():
     out, newest, skipped = [], "", 0
     for fn in files:
         code = fn[:-4]
-        dates, closes, vols = parse_series(T.read_stock(code))
+        series = T.read_stock(code)
+        dates, closes, vols = parse_series(series)
         if not closes:
             skipped += 1
             continue
         if dates[-1] > newest:
             newest = dates[-1]
-        out.append(line_for(code, compute(closes, vols)))
+        o = compute(closes, vols)
+        o["ampY"] = amp_prev(series)
+        out.append(line_for(code, o))
 
     os.makedirs(T.DATA, exist_ok=True)
     head = "TWLVI1|%s|%s|%d|%s" % (newest, now.strftime("%Y%m%d%H%M"), len(out), COLS)

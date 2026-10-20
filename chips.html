@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A1015">
+<title>籌碼看板</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#E9EDEF; --surface:#FFFFFF; --surface2:#F3F6F7; --sunk:#DFE6EA;
+  --text:#121A1F; --muted:#5C6E79; --line:#CFD9DF; --line2:#E4EAEE;
+  --accent:#155E7E; --accent-ink:#FFFFFF; --accent-soft:#DBEAF1;
+  --res:#C43A31; --res-bg:#F9E4E1;
+  --mid:#9E7106; --mid-bg:#FAEFD6;
+  --sup:#0C8A61; --sup-bg:#DAF2E7;
+  --warn:#8E5400; --warn-bg:#FAECD6;
+  --band:rgba(21,94,126,.09);
+  --c1:#155E7E; --c2:#9E7106; --c3:#7A4FB5; --c4:#B5487A; --c5:#2F8F9D;
+  --shadow:0 1px 2px rgba(18,26,31,.06), 0 6px 18px -12px rgba(18,26,31,.35);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+    --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+    --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+    --res:#FF7C6C; --res-bg:#331A1A;
+    --mid:#EFC257; --mid-bg:#322913;
+    --sup:#43CF91; --sup-bg:#0E2E23;
+    --warn:#EFB55A; --warn-bg:#312512;
+    --band:rgba(93,190,227,.10);
+    --c1:#5DBEE3; --c2:#EFC257; --c3:#B49AF0; --c4:#F08DB8; --c5:#6FD3DF;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+  --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+  --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+  --res:#FF7C6C; --res-bg:#331A1A;
+  --mid:#EFC257; --mid-bg:#322913;
+  --sup:#43CF91; --sup-bg:#0E2E23;
+  --warn:#EFB55A; --warn-bg:#312512;
+  --band:rgba(93,190,227,.10);
+  --c1:#5DBEE3; --c2:#EFC257; --c3:#B49AF0; --c4:#F08DB8; --c5:#6FD3DF;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.5 "Noto Sans TC",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+a{color:var(--accent)}
+.r{color:var(--res)} .g{color:var(--sup)} .mu{color:var(--muted)}
+
+/* 頂列 */
+.top{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 16px;
+  background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.top h1{font-size:16px;margin:0 6px 0 0;font-weight:700;white-space:nowrap}
+.top .back{font-size:13px;text-decoration:none;white-space:nowrap}
+.q{display:flex;gap:6px;align-items:center}
+.q input{width:150px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface2)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--surface2);padding:5px 10px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.btn{border:1px solid var(--line);background:var(--surface2);border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.spacer{flex:1}
+.menu{position:relative}
+.menu .pop{display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;min-width:220px;z-index:30}
+.menu.open .pop{display:block}
+.pop label{display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer}
+.pop .hint{font-size:12px;color:var(--muted);margin-top:6px}
+
+/* 主體 */
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;padding:12px 16px 24px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.info{padding:8px 12px;border-bottom:1px solid var(--line2);display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;min-height:38px}
+.info b{font-weight:600}
+.chartbox{position:relative;height:calc(100vh - 150px);min-height:520px}
+#chart{position:absolute;inset:0}
+.band{position:absolute;top:0;bottom:0;background:var(--band);pointer-events:none;z-index:2;display:none;
+  border-left:1px dashed var(--accent);border-right:1px dashed var(--accent)}
+.legends{position:absolute;inset:0;pointer-events:none;z-index:3}
+.lg{position:absolute;left:8px;font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;
+  background:color-mix(in srgb,var(--surface) 82%,transparent);padding:1px 6px;border-radius:6px;max-width:calc(100% - 90px)}
+.lg .t{font-weight:700}
+.lg select,.lg button{pointer-events:auto;font-size:12px;padding:0 4px;border:1px solid var(--line);border-radius:5px;background:var(--surface2)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:middle}
+.foot{padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line2)}
+
+/* 側欄 */
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.sec{padding:12px}
+.sec h2{font-size:14px;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sec h2 .sub{font-weight:400;font-size:12px;color:var(--muted)}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:10px;margin-bottom:8px}
+.head.buy{background:var(--res-bg)} .head.sell{background:var(--sup-bg)} .head.none{background:var(--surface2)}
+.head .big{font-size:22px;font-weight:700}
+.kv{display:grid;grid-template-columns:1fr auto;gap:3px 10px;font-size:13px}
+.kv .k{color:var(--muted)}
+.kv .v{text-align:right}
+.tip{cursor:help;border-bottom:1px dotted var(--muted)}
+.badge{display:inline-block;font-size:11px;padding:0 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-weight:400;white-space:nowrap}
+.badge.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+.note{font-size:12px;color:var(--muted);margin-top:6px}
+table.bk{width:100%;border-collapse:collapse;font-size:12.5px}
+table.bk th{font-weight:500;color:var(--muted);text-align:right;padding:4px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.bk th:first-child,table.bk td:first-child{text-align:left}
+table.bk td{padding:4px 4px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+table.bk tr.row{cursor:pointer}
+table.bk tr.row:hover td{background:var(--surface2)}
+table.bk tr.on td{background:var(--accent-soft)}
+.tw{overflow-x:auto;margin:0 -4px}
+.bname{max-width:118px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
+.star{color:var(--accent);width:14px;display:inline-block}
+.tabs{display:flex;gap:6px;margin-bottom:8px}
+.tabs button{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:1px 4px 1px 8px;font-size:12px;background:var(--surface2)}
+.chip button{border:0;background:none;cursor:pointer;color:var(--muted);padding:0 4px}
+.empty{padding:14px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface2);border-radius:8px}
+.imp{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ok{color:var(--sup)} .bad{color:var(--res)}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:minmax(0,1fr);padding:10px}
+  .top{padding:8px 10px;position:static}
+  .q input{width:120px}
+  .chartbox{height:72vh;min-height:460px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>籌碼看板</h1>
+  <a class="back" href="./">← 三線點位</a>
+  <form class="q" id="qf" autocomplete="off">
+    <input id="q" list="names" placeholder="代號或名稱" aria-label="股票代號或名稱">
+    <datalist id="names"></datalist>
+    <button class="btn pri" type="submit">看</button>
+  </form>
+  <div class="seg" id="range" role="group" aria-label="顯示範圍">
+    <button data-m="3">3月</button><button data-m="6" class="on">6月</button><button data-m="12">1年</button><button data-m="0">全部</button>
+  </div>
+  <span class="spacer"></span>
+  <div class="menu" id="paneMenu">
+    <button class="btn" id="paneBtn" aria-haspopup="true">副圖 ▾</button>
+    <div class="pop" id="panePop"></div>
+  </div>
+  <button class="btn" id="impBtn">匯入分點資料</button>
+  <input type="file" id="impFile" multiple accept=".csv" hidden>
+</header>
+
+<main class="wrap">
+  <section class="card" style="min-width:0">
+    <div class="info mono" id="info">載入中…</div>
+    <div class="chartbox">
+      <div id="chart"></div>
+      <div class="band" id="band"></div>
+      <div class="legends" id="legends"></div>
+    </div>
+    <div class="foot">點圖上任一天：右側顯示那一天的分點明細，色帶是統計區間。紅＝買超／上漲，綠＝賣超／下跌。分點資料只在榜單內觀察到，沒上榜的日子是空白，不是 0。<br>圖表元件：<a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts™</div>
+  </section>
+
+  <aside class="side">
+    <section class="card sec">
+      <h2>主力動向 <span class="sub" id="selDate"></span></h2>
+      <div class="tabs seg" id="days" role="group" aria-label="統計天數" style="display:flex">
+        <button data-n="1" class="on">1日</button><button data-n="5">5日</button><button data-n="10">10日</button><button data-n="20">20日</button>
+      </div>
+      <div id="flow"></div>
+    </section>
+
+    <section class="card sec">
+      <h2>三大法人 <span class="sub">官方，張</span></h2>
+      <div id="inst"></div>
+    </section>
+
+    <section class="card sec">
+      <h2>分點明細 <span class="sub" id="bkSub"></span></h2>
+      <div class="tabs seg" id="side" role="group" aria-label="買方或賣方" style="display:flex">
+        <button data-s="buy" class="on">買方 15</button><button data-s="sell">賣方 15</button>
+      </div>
+      <div id="bk"></div>
+      <div class="note">點分點 → 加入下方「分點追蹤」副圖。均價對收盤：正＝收盤高於分點均價。</div>
+    </section>
+
+    <section class="card sec">
+      <h2>分點追蹤</h2>
+      <div class="chips" id="track"></div>
+    </section>
+
+    <section class="card sec">
+      <h2>分點資料 <span class="badge">只存在這個瀏覽器，不會上傳</span></h2>
+      <div id="impStat" class="note" style="margin-top:0"></div>
+      <div class="imp" style="margin-top:8px">
+        <button class="btn" id="impBtn2">選擇檔案</button>
+        <button class="btn" id="clrBtn">清除</button>
+      </div>
+      <div class="note">選 GPT 整理的 <code>branch_clean_*.csv</code>、<code>broker_class.csv</code>、<code>stock_status_*.csv</code>，可一次多選。<code>mainprofit</code> 是事後補抓的損益排行，會讀取但不用在任何計算。</div>
+    </section>
+  </aside>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function(){
+'use strict';
+var LC = window.LightweightCharts;
+var $ = function(id){ return document.getElementById(id); };
+var css = function(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
+var fmt0 = function(v){ return v==null||isNaN(v) ? '—' : Math.round(v).toLocaleString('en-US'); };
+var fmtS = function(v){ return v==null||isNaN(v) ? '—' : (v>0?'+':'')+Math.round(v).toLocaleString('en-US'); };
+var fmtP = function(v,d){ return v==null||isNaN(v) ? '—' : (v>0?'+':'')+v.toFixed(d==null?2:d)+'%'; };
+var cls = function(v){ return v>0?'r':(v<0?'g':''); };
+var esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); };
+var iso = function(d){ return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8); };
+var num = function(s){ s=(s==null?'':String(s)).trim(); return s==='' ? null : +s; };
+
+/* ---------- 狀態 ---------- */
+var S = {
+  code:'1101', names:{}, shares:{},
+  px:[], chip:{}, tdcc:[],          // 價量、法人融資（依日期）、集保
+  bk:{}, cls:{}, status:{}, mpRows:0,  // 分點：bk[code][date] = rows
+  sel:null, days:1, side:'buy', months:6,
+  track:[],                          // 追蹤中的分點名稱
+  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true}
+};
+try{ var saved=JSON.parse(localStorage.getItem('twlvChipsUI')||'{}');
+  if(saved.panes) for(var k in saved.panes) if(k in S.panes) S.panes[k]=!!saved.panes[k];
+  if(saved.months!=null) S.months=saved.months;
+}catch(e){}
+function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({panes:S.panes,months:S.months})); }catch(e){} }
+
+var PANES = [
+  ['vol','成交量＋均量線'],['main','主力買賣超'],['fgn','外資'],['inv','投信'],['dlr','自營商'],['isum','三大法人合計'],
+  ['mgn','融資融券'],['qfii','外資持股比率（上市）'],['tdcc','集保大戶／散戶（每週）'],['track','分點追蹤']
+];
+var INST={fgn:['外資','--c1'],inv:['投信','--c3'],dlr:['自營商','--c2'],isum:['三大法人合計','--c5']};
+function instVal(r,k){ if(!r) return null; return k==='fgn'?r.fgn : k==='inv'?r.inv : k==='dlr'?sumN(r.dS,r.dH) : sumN(r.fgn,r.inv,r.dS,r.dH); }
+
+/* ---------- IndexedDB：分點資料只存本機 ---------- */
+var DB=null;
+function idb(){ return new Promise(function(res){
+  if(DB) return res(DB);
+  try{
+    var rq=indexedDB.open('twlvBroker',1);
+    rq.onupgradeneeded=function(){ var d=rq.result; if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); };
+    rq.onsuccess=function(){ DB=rq.result; res(DB); };
+    rq.onerror=function(){ res(null); };
+  }catch(e){ res(null); }
+});}
+function idbGet(k){ return idb().then(function(d){ return new Promise(function(res){
+  if(!d) return res(null);
+  try{ var r=d.transaction('kv').objectStore('kv').get(k); r.onsuccess=function(){res(r.result||null);}; r.onerror=function(){res(null);}; }catch(e){ res(null); }
+});});}
+function idbPut(k,v){ return idb().then(function(d){ return new Promise(function(res){
+  if(!d) return res(false);
+  try{ var tx=d.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; }catch(e){ res(false); }
+});});}
+function idbClear(){ return idb().then(function(d){ return new Promise(function(res){
+  if(!d) return res(false);
+  try{ var tx=d.transaction('kv','readwrite'); tx.objectStore('kv').clear(); tx.oncomplete=function(){res(true);}; }catch(e){ res(false); }
+});});}
+
+/* ---------- CSV ---------- */
+function parseCSV(text){
+  text=text.replace(/^﻿/,'');
+  var rows=[], row=[], f='', q=false;
+  for(var i=0;i<text.length;i++){
+    var c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ f+='"'; i++; } else q=false; } else f+=c; }
+    else if(c==='"') q=true;
+    else if(c===','){ row.push(f); f=''; }
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=''; }
+    else f+=c;
+  }
+  if(f!==''||row.length){ row.push(f); rows.push(row); }
+  rows=rows.filter(function(r){ return !(r.length===1&&r[0]===''); });
+  if(!rows.length) return [];
+  var h=rows[0];
+  return rows.slice(1).map(function(r){ var o={}; h.forEach(function(k,j){ o[k]=r[j]==null?'':r[j]; }); return o; });
+}
+
+/* ---------- 讀公開資料 ---------- */
+function getText(u){ return fetch(u+'?t='+Date.now(),{cache:'no-store'}).then(function(r){ if(!r.ok) throw new Error(u+' '+r.status); return r.text(); }); }
+
+function loadNames(){
+  return getText('data/market.txt').then(function(t){
+    var lines=t.split('\n'); var dl=[];
+    for(var i=1;i<lines.length;i++){ var p=lines[i].split(','); if(p.length<2||!p[0]) continue;
+      S.names[p[0]]=p[1]; dl.push('<option value="'+esc(p[0]+' '+p[1])+'">'); }
+    $('names').innerHTML=dl.join('');
+  }).catch(function(){});
+}
+function loadShares(){
+  return getText('data/shares.txt').then(function(t){
+    t.split('\n').forEach(function(l){ var p=l.split(','); if(p[0]&&p[1]) S.shares[p[0]]=+p[1]; });
+  }).catch(function(){});
+}
+function loadStock(code){
+  var a=getText('data/stock/'+encodeURIComponent(code)+'.txt').then(function(t){
+    var out=[];
+    t.split('\n').forEach(function(l){ if(!l||l[0]==='#') return; var p=l.split(',');
+      if(p.length<6) return;
+      out.push({d:p[0], t:iso(p[0]), o:+p[1], h:+p[2], l:+p[3], c:+p[4], v:num(p[5]), w:num(p[6])}); });
+    return out;
+  });
+  var b=getText('data/chipstock/'+encodeURIComponent(code)+'.txt').then(function(t){
+    var chip={}, tdcc=[], qfii=[], sec='';
+    t.split('\n').forEach(function(l){
+      if(!l) return;
+      if(l[0]==='#'){ sec=l.indexOf('tdcc')>=0?'tdcc':(l.indexOf('qfii')>=0?'qfii':'chip'); return; }
+      var p=l.split(',');
+      if(sec==='chip') chip[p[0]]={fgn:num(p[1]),inv:num(p[2]),dS:num(p[3]),dH:num(p[4]),mgn:num(p[5]),shrt:num(p[6])};
+      else if(sec==='qfii') qfii.push({d:p[0],t:iso(p[0]),ratio:num(p[1]),held:num(p[2])});
+      else tdcc.push({d:p[0],t:iso(p[0]),big:num(p[1]),small:num(p[2]),holders:num(p[3])});
+    });
+    return {chip:chip,tdcc:tdcc,qfii:qfii};
+  }).catch(function(){ return {chip:{},tdcc:[],qfii:[]}; });
+  return Promise.all([a,b]);
+}
+
+/* ---------- 指標 ---------- */
+function ma(arr,n){ var o=[],s=0; for(var i=0;i<arr.length;i++){ s+=arr[i]; if(i>=n) s-=arr[i-n]; o.push(i>=n-1?s/n:null); } return o; }
+function boll(cl){
+  var m=ma(cl,20), up=[], lo=[];
+  for(var i=0;i<cl.length;i++){
+    if(m[i]==null){ up.push(null); lo.push(null); continue; }
+    var v=0; for(var j=i-19;j<=i;j++) v+=(cl[j]-m[i])*(cl[j]-m[i]);
+    var sd=Math.sqrt(v/20);                      // 母體標準差（與主站一致）
+    up.push(m[i]+2*sd); lo.push(m[i]-2*sd);
+  }
+  return {m:m,up:up,lo:lo};
+}
+
+// 與主站 indicators.py、回測 backtest.py 同一套定義
+function indicators(px,b){
+  var out=[];
+  for(var i=0;i<px.length;i++){
+    var o={}, up=b.up[i], lo=b.lo[i], mid=b.m[i];
+    if(up!=null&&lo>0){ o.bbW=(up/lo-1)*100; o.pos= up>mid ? (px[i].c-mid)/(up-mid)*10 : 0; }
+    if(i>0&&b.up[i-1]!=null&&up!=null){ o.sUp=(up/b.up[i-1]-1)*100; o.sLo=(lo/b.lo[i-1]-1)*100;
+      var w0=(b.up[i-1]/b.lo[i-1]-1)*100; o.wChg=o.bbW-w0; }
+    var mn=null; for(var k=1;k<=10;k++){ var j=i-k; if(j<0||b.up[j]==null||!(b.lo[j]>0)) continue; var w=(b.up[j]/b.lo[j]-1)*100; mn=mn==null?w:Math.min(mn,w); } o.wMin10=mn;
+    if(i>=20){ var s=0,n=0; for(var k2=i-20;k2<i;k2++){ if(px[k2].v!=null){ s+=px[k2].v; n++; } } o.vr=n&&s>0&&px[i].v!=null? px[i].v/(s/n) : null; }
+    o.chg= i>0 ? (px[i].c/px[i-1].c-1)*100 : null;
+    o.s20 = (i>0&&mid!=null&&b.m[i-1]!=null) ? (mid/b.m[i-1]-1)*100 : null;   // 月線斜率 = 月(今)/月(昨) − 1
+    o.zone = o.pos==null?null : o.pos>=8?'貼上軌' : o.pos>0?'上半部' : o.pos>-8?'下半部' : '貼下軌';
+    o.open = o.wChg>0.5 && o.wMin10!=null && o.wMin10<=10;
+    // 與回測 b1 相同：再要求昨日帶寬 ≤ 15（昨天還是縮的、今天才打開）
+    o.bwy = (o.bbW!=null&&o.wChg!=null) ? o.bbW-o.wChg : null;
+    o.b1 = o.open && o.sUp>1 && o.pos>0 && o.chg>=1 && o.vr>=1.5 && o.bwy!=null && o.bwy<=15;
+    o.b4 = o.pos>=8 && o.sUp>=3;
+    out.push(o);
+  }
+  return out;
+}
+
+/* ---------- 分點計算（只用 Branch） ---------- */
+function bkDay(code,d){ var c=S.bk[code]; return c&&c[d] ? c[d] : null; }
+function dayFlow(code,d){
+  var rows=bkDay(code,d); if(!rows) return null;
+  var b=0,s=0,bl=[],sl=[];
+  rows.forEach(function(r){ var n=num(r.net_lots); if(n==null) return;
+    if(r.side==='buy'){ b+=n; bl.push(n); } else if(r.side==='sell'){ s+=n; sl.push(n); } });
+  bl.sort(function(x,y){return y-x;}); sl.sort(function(x,y){return x-y;});
+  return {buy15:b, sell15:s, net15:b+s,
+    top1: b>0&&bl.length? bl[0]/b*100 : null,
+    top3: b>0? (bl[0]+(bl[1]||0)+(bl[2]||0))/b*100 : null,
+    stop1: s<0&&sl.length? sl[0]/s*100 : null};
+}
+function idxOf(d){ for(var i=S.px.length-1;i>=0;i--) if(S.px[i].d===d) return i; return -1; }
+function windowStats(code,endD,n){
+  var i=idxOf(endD); if(i<0) return null;
+  var from=Math.max(0,i-n+1), dates=[], vol=0, volOk=true, got=0, b=0,s=0, lowVol=false;
+  for(var k=from;k<=i;k++){
+    var p=S.px[k]; dates.push(p.d);
+    if(p.v==null) volOk=false; else { vol+=p.v; if(p.v<100) lowVol=true; }
+    var f=dayFlow(code,p.d); if(f){ got++; b+=f.buy15; s+=f.sell15; }
+  }
+  var full = got===dates.length && dates.length===n;
+  var net=b+s, conc=null, why='';
+  if(!got) why='這段期間沒有分點資料';
+  else if(!full) why='缺 '+(n-got)+' 天分點資料，比例不計算';
+  else if(lowVol) why='有成交量低於 100 張的日子，比例不計算';
+  else if(!volOk||vol<=0) why='官方成交量缺漏';
+  else conc=net/vol*100;
+  var sh=S.shares[code];
+  return {from:dates[0], to:dates[dates.length-1], n:dates.length, got:got, vol:volOk?vol:null,
+    buy15:got?b:null, sell15:got?s:null, net15:got?net:null, conc:conc, why:why,
+    cap: (got&&full&&sh)? net/sh*100 : null, day: n===1 ? dayFlow(code,endD) : null};
+}
+function streak(key,endIdx){
+  var c=0, sgn=0;
+  for(var i=endIdx;i>=0;i--){
+    var r=S.chip[S.px[i].d]; if(!r) break;
+    var v = key==='dlr' ? sumN(r.dS,r.dH) : r[key];
+    if(v==null||v===0) break;
+    var s=v>0?1:-1; if(!sgn) sgn=s; if(s!==sgn) break; c++;
+  }
+  return c*sgn;
+}
+function sumN(){ var s=0,ok=false; for(var i=0;i<arguments.length;i++){ if(arguments[i]!=null){ s+=arguments[i]; ok=true; } } return ok?s:null; }
+
+/* ---------- 圖表 ---------- */
+var chart=null, ser={}, paneIdx={};
+function themeOpts(){
+  return {
+    layout:{ background:{type:'solid',color:css('--surface')}, textColor:css('--muted'),
+      fontFamily:'"IBM Plex Mono", ui-monospace, monospace', fontSize:11,
+      panes:{separatorColor:css('--line'), separatorHoverColor:css('--accent-soft'), enableResize:true},
+      attributionLogo:false },
+    grid:{ vertLines:{color:css('--line2')}, horzLines:{color:css('--line2')} },
+    rightPriceScale:{ borderColor:css('--line') },
+    timeScale:{ borderColor:css('--line') },
+    crosshair:{ mode:LC.CrosshairMode.Normal }
+  };
+}
+function buildChart(){
+  if(chart){ chart.remove(); chart=null; }
+  ser={}; paneIdx={};
+  var el=$('chart');
+  chart=LC.createChart(el, Object.assign(themeOpts(), {
+    autoSize:true,
+    localization:{ locale:'zh-TW', dateFormat:'yyyy-MM-dd' },
+    leftPriceScale:{ visible: !!(S.panes.main||S.panes.mgn||S.panes.tdcc||S.panes.track||S.panes.fgn||S.panes.inv||S.panes.dlr||S.panes.isum), borderColor:css('--line') },
+    timeScale:{ borderColor:css('--line'), rightOffset:3, minBarSpacing:2,
+      tickMarkFormatter:function(t,type){
+        var s=typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'));
+        var y=s.slice(0,4), m=+s.slice(5,7), d=+s.slice(8,10);
+        if(type===0) return y;           // Year
+        if(type===1) return m+'月';       // Month
+        return String(d);
+      } }
+  }));
+  var up=css('--res'), dn=css('--sup');
+  var pi=0;
+  var INT={priceFormat:{type:'custom',minMove:1,formatter:function(v){ return Math.round(v).toLocaleString('en-US'); }}};
+  var I=function(o){ return Object.assign({},INT,o); };
+  ser.k=chart.addSeries(LC.CandlestickSeries,{upColor:up,downColor:dn,borderUpColor:up,borderDownColor:dn,wickUpColor:up,wickDownColor:dn,priceLineVisible:true,lastValueVisible:true},0);
+  ser.ma=chart.addSeries(LC.LineSeries,{color:css('--c2'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
+  ser.bu=chart.addSeries(LC.LineSeries,{color:css('--muted'),lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
+  ser.bl=chart.addSeries(LC.LineSeries,{color:css('--muted'),lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
+  paneIdx.k=0;
+  function addPane(key){ pi++; paneIdx[key]=pi; return pi; }
+  if(S.panes.vol){ var p=addPane('vol');
+    ser.vol=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p);
+    ser.vma5=chart.addSeries(LC.LineSeries,I({color:css('--c2'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}),p);
+    ser.vma20=chart.addSeries(LC.LineSeries,I({color:css('--c3'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}),p); }
+  if(S.panes.main){ var p2=addPane('main');
+    ser.main=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p2);
+    ser.mainCum=chart.addSeries(LC.LineSeries,I({color:css('--c1'),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false}),p2);
+    chart.panes()[p2].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
+  ['fgn','inv','dlr','isum'].forEach(function(k){ if(!S.panes[k]) return; var pp=addPane(k);
+    ser['h_'+k]=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),pp);
+    ser['c_'+k]=chart.addSeries(LC.LineSeries,I({color:css(INST[k][1]),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false}),pp); });
+  if(S.panes.mgn){ var p4=addPane('mgn');
+    ser.mgn=chart.addSeries(LC.LineSeries,I({color:css('--res'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false}),p4);
+    ser.shrt=chart.addSeries(LC.LineSeries,I({color:css('--sup'),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false}),p4);
+    chart.panes()[p4].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
+  if(S.panes.qfii){ var pq=addPane('qfii');
+    ser.qfii=chart.addSeries(LC.LineSeries,{color:css('--c1'),lineWidth:2,pointMarkersVisible:true,priceLineVisible:false,lastValueVisible:false},pq); }
+  if(S.panes.tdcc){ var p5=addPane('tdcc');
+    ser.big=chart.addSeries(LC.LineSeries,{color:css('--res'),lineWidth:2,pointMarkersVisible:true,priceLineVisible:false,lastValueVisible:false},p5);
+    ser.small=chart.addSeries(LC.LineSeries,{color:css('--sup'),lineWidth:2,pointMarkersVisible:true,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false},p5);
+    chart.panes()[p5].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
+  if(S.panes.track){ var p6=addPane('track');
+    ser.trk=[]; var colors=['--c1','--c3','--c4','--c5','--c2'];
+    ser.trkH=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p6);
+    S.track.forEach(function(name,i){
+      ser.trk.push(chart.addSeries(LC.LineSeries,I({color:css(colors[i%colors.length]),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false,pointMarkersVisible:true}),p6));
+    });
+    chart.panes()[p6].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
+  // 高度：主圖大、副圖小
+  var ps=chart.panes(); ps[0].setStretchFactor(3.2); for(var i=1;i<ps.length;i++) ps[i].setStretchFactor(1);
+
+  chart.subscribeCrosshairMove(onMove);
+  chart.subscribeClick(function(p){ if(p&&p.time){ S.sel=String(p.time).replace(/-/g,''); renderSide(); drawBand(); updateLegend(S.hover); } });
+  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ drawBand(); placeLegends(); });
+  new ResizeObserver(function(){ drawBand(); placeLegends(); }).observe(el);
+  fillData();
+  applyRange();
+}
+function fillData(){
+  var px=S.px; if(!px.length) return;
+  var up=css('--res'), dn=css('--sup');
+  var upA=up+'99', dnA=dn+'99';
+  ser.k.setData(px.map(function(p){ return {time:p.t,open:p.o,high:p.h,low:p.l,close:p.c}; }));
+  var b=boll(px.map(function(p){return p.c;}));
+  var line=function(arr){ return px.map(function(p,i){ return arr[i]==null?{time:p.t}:{time:p.t,value:arr[i]}; }); };
+  ser.ma.setData(line(b.m)); ser.bu.setData(line(b.up)); ser.bl.setData(line(b.lo));
+  S.boll=b; S.ind=indicators(px,b);
+  if(ser.vol){ ser.vol.setData(px.map(function(p,i){ var prev=i?px[i-1].c:p.o;
+    return p.v==null?{time:p.t}:{time:p.t,value:p.v,color:(p.c>=prev?upA:dnA)}; }));
+    var vv=px.map(function(p){return p.v||0;}), m5=ma(vv,5), m20=ma(vv,20);
+    ser.vma5.setData(line(m5)); ser.vma20.setData(line(m20)); S.vma={m5:m5,m20:m20}; }
+  if(ser.main){
+    var cum=0, any=false;
+    ser.main.setData(px.map(function(p){ var f=dayFlow(S.code,p.d); if(!f) return {time:p.t};
+      return {time:p.t,value:f.net15,color:f.net15>=0?up:dn}; }));
+    ser.mainCum.setData(px.map(function(p){ var f=dayFlow(S.code,p.d); if(!f) return any?{time:p.t}:{time:p.t};
+      any=true; cum+=f.net15; return {time:p.t,value:cum}; }));
+  }
+  var ch=function(p){ return S.chip[p.d]; };
+  ['fgn','inv','dlr','isum'].forEach(function(k){ if(!ser['h_'+k]) return; var cum=0;
+    ser['h_'+k].setData(px.map(function(p){ var v=instVal(ch(p),k); return v==null?{time:p.t}:{time:p.t,value:v,color:v>=0?up:dn}; }));
+    ser['c_'+k].setData(px.map(function(p){ var v=instVal(ch(p),k); if(v==null) return {time:p.t}; cum+=v; return {time:p.t,value:cum}; })); });
+  if(ser.mgn){
+    ser.mgn.setData(px.map(function(p){ var r=ch(p); return r&&r.mgn!=null?{time:p.t,value:r.mgn}:{time:p.t}; }));
+    ser.shrt.setData(px.map(function(p){ var r=ch(p); return r&&r.shrt!=null?{time:p.t,value:r.shrt}:{time:p.t}; }));
+  }
+  if(ser.qfii){ var f0=px[0].t;
+    ser.qfii.setData((S.qfii||[]).filter(function(r){return r.t>=f0&&r.ratio!=null;}).map(function(r){ return {time:r.t,value:r.ratio}; })); }
+  if(ser.big){
+    var have={}; S.tdcc.forEach(function(r){ have[r.t]=r; });
+    var first=px[0].t;
+    ser.big.setData(S.tdcc.filter(function(r){return r.t>=first&&r.big!=null;}).map(function(r){ return {time:r.t,value:r.big}; }));
+    ser.small.setData(S.tdcc.filter(function(r){return r.t>=first&&r.small!=null;}).map(function(r){ return {time:r.t,value:r.small}; }));
+  }
+  if(ser.trkH){
+    var act=S.track[0];
+    ser.trkH.setData(px.map(function(p){ var n=brokerNet(S.code,p.d,act); return n==null?{time:p.t}:{time:p.t,value:n,color:n>=0?up:dn}; }));
+    S.track.forEach(function(name,i){ var cum=0, seen=false;
+      ser.trk[i].setData(px.map(function(p){ var n=brokerNet(S.code,p.d,name);
+        if(n==null) return {time:p.t};   // 未上榜：留空，不當 0
+        seen=true; cum+=n; return {time:p.t,value:cum}; })); });
+  }
+  placeLegends(); updateLegend(null);
+}
+function brokerNet(code,d,name){
+  if(!name) return null; var rows=bkDay(code,d); if(!rows) return null;
+  var tot=null; rows.forEach(function(r){ if(r.broker===name){ var n=num(r.net_lots); if(n!=null) tot=(tot||0)+n; } });
+  return tot;
+}
+function applyRange(){
+  var n=S.px.length; if(!n||!chart) return;
+  if(!S.months){ chart.timeScale().fitContent(); return; }
+  var bars=Math.round(S.months*21);
+  chart.timeScale().setVisibleLogicalRange({from:Math.max(0,n-bars), to:n+2});
+}
+
+/* ---------- 圖例 ---------- */
+function paneTops(){
+  if(!chart) return [];
+  var tops=[], y=0; chart.panes().forEach(function(p){ tops.push(y); y+=p.getHeight()+1; }); return tops;
+}
+function placeLegends(){
+  var box=$('legends'); if(!chart){ box.innerHTML=''; return; }
+  var tops=paneTops(), html=[];
+  html.push('<div class="lg" data-p="k" style="top:'+(tops[0]+4)+'px"></div>');
+  PANES.forEach(function(pp){ var k=pp[0]; if(paneIdx[k]!=null) html.push('<div class="lg" data-p="'+k+'" style="top:'+(tops[paneIdx[k]]+3)+'px"></div>'); });
+  box.innerHTML=html.join('');
+  updateLegend(S.hover||null);
+}
+function legendSet(k,h){ var el=document.querySelector('.lg[data-p="'+k+'"]'); if(el) el.innerHTML=h; }
+function dot(v){ return '<span class="dot" style="background:'+css(v)+'"></span>'; }
+function updateLegend(d){
+  d = d || S.sel;
+  var i = d ? idxOf(d) : S.px.length-1; if(i<0) i=S.px.length-1; if(i<0) return;
+  var p=S.px[i], prev=i?S.px[i-1].c:null, chg=prev?p.c-prev:null;
+  $('info').innerHTML='<span><b>'+esc(S.code+' '+(S.names[S.code]||''))+'</b></span>'+
+    '<span>'+iso(p.d)+'</span><span>開 '+p.o+'</span><span>高 '+p.h+'</span><span>低 '+p.l+'</span>'+
+    '<span>收 <b class="'+cls(chg)+'">'+p.c+'</b></span>'+
+    (chg!=null?'<span class="'+cls(chg)+'">'+(chg>0?'+':'')+chg.toFixed(2)+'（'+fmtP(chg/prev*100)+'）</span>':'')+
+    '<span>量 '+fmt0(p.v)+' 張</span>'+
+    (function(){ var a=function(k){ if(k<1) return null; var q=S.px[k]; return (q.h-q.l)/S.px[k-1].c*100; };
+      var t=a(i), y=a(i-1);
+      return '<span title="（最高 − 最低）÷ 昨收">振幅 '+(t==null?'—':t.toFixed(2)+'%')+'</span><span class="mu">前日振幅 '+(y==null?'—':y.toFixed(2)+'%')+'</span>'; })();
+  var b=S.boll||{m:[],up:[],lo:[]};
+  var o=(S.ind||[])[i]||{}, n1=function(v,d){ return v==null||isNaN(v)?'—':v.toFixed(d==null?1:d); };
+  var flags=[];
+  if(o.s20>1) flags.push('<span class="badge" style="border-color:var(--res);color:var(--res)" title="月線斜率 &gt; 1：超級強勢股，若要做空只能短空">超級強勢：只能短空</span>');
+  if(o.s20<-1) flags.push('<span class="badge" style="border-color:var(--sup);color:var(--sup)" title="月線斜率 &lt; −1：超級弱勢股，若要做多只能短多">超級弱勢：只能短多</span>');
+  if(o.sUp>3) flags.push('<span class="badge" style="background:var(--res-bg);border-color:var(--res);color:var(--res)" title="上通斜率 &gt; 3：位階亮紅燈，超級強勢股，若要空只能短空。回測：波段空確定不行（可信度中，反向）；短空也沒通過驗證">紅燈：別波段空</span>');
+  if(o.sLo<-3) flags.push('<span class="badge" style="background:var(--sup-bg);border-color:var(--sup);color:var(--sup)" title="下通斜率 &lt; −3：位階亮綠燈，超級弱勢股，若要多只能短多（講義，未單獨回測）">綠燈：別波段多</span>');
+  if(o.bbW!=null&&o.bbW>20) flags.push('<span class="badge" title="帶寬 &gt; 20：股價短線振幅大，適合當沖（講義；沒有盤中資料，無法回測）">帶寬大：適合當沖</span>');
+  else if(o.bbW!=null&&o.bbW<5) flags.push('<span class="badge" title="帶寬 &lt; 5：股價長期振幅小，不適合當沖（講義；沒有盤中資料，無法回測）">帶寬小：不適合當沖</span>');
+  if(o.bbW!=null&&o.bbW<10) flags.push('<span class="badge">擠壓中</span>');
+  if(o.open) flags.push('<span class="badge">'+(o.sUp>1?'往上':(o.sLo<-1?'往下':''))+'開布林</span>');
+  if(o.b1) flags.push('<span class="badge warn" title="回測 1,336 天：隔天開盤追進去會穩定小賠（反指標）">往上帶量開布林：隔天別追</span>');
+  if(o.b4) flags.push('<span class="badge" style="border-color:var(--res);color:var(--res)" title="回測 1,336 天：跌破月線才賣，淨 +1.27%，可信度中">貼上軌強勢走</span>');
+  legendSet('k', dot('--c2')+'月線 '+(b.m[i]!=null?b.m[i].toFixed(2):'—')+'　'+dot('--muted')+'布林 '+(b.up[i]!=null?b.up[i].toFixed(2):'—')+' / '+(b.lo[i]!=null?b.lo[i].toFixed(2):'—')+
+    '　<span class="tip" title="月(今) ÷ 月(昨) − 1；&gt; 1 超級強勢、&lt; −1 超級弱勢">月線斜率</span> <span class="'+cls(o.s20)+'">'+n1(o.s20,2)+'%</span>'+
+    '　<span class="tip" title="上軌 = 10、中軌 = 0、下軌 = −10">位階</span> <b>'+n1(o.pos)+'</b>'+(o.zone?'（'+o.zone+'）':'')+
+    '　帶寬 '+n1(o.bbW)+'%（'+(o.wChg==null?'—':(o.wChg>0?'+':'')+o.wChg.toFixed(1))+'）'+
+    '　<span class="tip" title="上軌今日 ÷ 昨日 − 1；> 3 紅燈（做空要避開）">上通斜率</span> <span class="'+cls(o.sUp)+'">'+n1(o.sUp,2)+'%</span>'+
+    '　下通斜率 <span class="'+cls(o.sLo)+'">'+n1(o.sLo,2)+'%</span>'+
+    '　<span class="tip" title="今日量 ÷ 前 20 日均量">均量比</span> '+n1(o.vr,2)+(flags.length?'　'+flags.join(' '):''));
+  var vm=S.vma||{m5:[],m20:[]};
+  legendSet('vol','<span class="t">成交量</span> '+fmt0(p.v)+' 張　'+dot('--c2')+'5日均量 '+fmt0(vm.m5[i])+'　'+dot('--c3')+'20日均量 '+fmt0(vm.m20[i]));
+  var f=dayFlow(S.code,p.d), cum=null;
+  if(f){ cum=0; for(var j=0;j<=i;j++){ var ff=dayFlow(S.code,S.px[j].d); if(ff) cum+=ff.net15; } }
+  legendSet('main','<span class="t">主力買賣超</span> <span class="'+(f?cls(f.net15):'mu')+'">'+(f?fmtS(f.net15)+' 張':'未觀察到')+'</span>'+
+    (f?'　'+dot('--c1')+'觀察累計 '+fmtS(cum):'')+' <span class="badge">事後補抓</span>');
+  var r=S.chip[p.d]||{};
+  ['fgn','inv','dlr','isum'].forEach(function(k){
+    var v=instVal(r,k), c=0, seen=false; for(var q=0;q<=i;q++){ var vv=instVal(S.chip[S.px[q].d],k); if(vv!=null){ c+=vv; seen=true; } }
+    legendSet(k,'<span class="t">'+INST[k][0]+'</span> <span class="'+cls(v)+'">'+fmtS(v)+' 張</span>　'+dot(INST[k][1])+
+      '<span class="tip" title="從 '+iso(S.px[0].d)+' 起每日買賣超加總。不是持股：起算日之前的持股不知道">累計</span> '+(seen?fmtS(c):'—')+'（左軸）');
+  });
+  legendSet('mgn','<span class="t">融資融券</span> '+dot('--res')+'融資 '+fmt0(r.mgn)+'　'+dot('--sup')+'融券 '+fmt0(r.shrt)+'（左軸）');
+  var qf=null; (S.qfii||[]).forEach(function(x){ if(x.d<=p.d) qf=x; });
+  legendSet('qfii','<span class="t">外資持股比率</span> '+(qf? dot('--c1')+qf.ratio+'%　'+fmt0(qf.held)+' 張　'+iso(qf.d)+'<span class="mu">（官方持股＝外資的庫存）</span>' :
+    '<span class="mu">'+((S.qfii||[]).length ? '這一天之前沒有資料（從 '+iso(S.qfii[0].d)+' 開始累積）' : '還沒有資料：每天收盤後開始累積；上櫃的官方來源還在確認')+'</span>'));
+  var td=null; S.tdcc.forEach(function(x){ if(x.d<=p.d) td=x; });
+  legendSet('tdcc','<span class="t">集保</span> '+(td?dot('--res')+'大戶（400 張以上）'+td.big+'%　'+dot('--sup')+'散戶（100 張以下）'+td.small+'%（左軸）　'+iso(td.d):'這段期間沒有集保資料'));
+  var colors=['--c1','--c3','--c4','--c5','--c2'];
+  legendSet('track','<span class="t">分點追蹤</span> '+(S.track.length? S.track.map(function(n,k){ var v=brokerNet(S.code,p.d,n);
+      return dot(colors[k%colors.length])+esc(n)+' <span class="'+(v==null?'mu':cls(v))+'">'+(v==null?'未上榜':fmtS(v))+'</span>'; }).join('　')+'（柱＝第一個，線＝觀察累計）' : '<span class="mu">從右側分點明細點選分點加入</span>'));
+}
+function onMove(param){
+  if(!param||!param.time){ S.hover=null; updateLegend(null); return; }
+  S.hover=String(param.time).replace(/-/g,''); updateLegend(S.hover);
+}
+
+/* ---------- 區間色帶 ---------- */
+function drawBand(){
+  var el=$('band'); if(!chart||!S.sel){ el.style.display='none'; return; }
+  var i=idxOf(S.sel); if(i<0){ el.style.display='none'; return; }
+  var from=S.px[Math.max(0,i-S.days+1)].t, to=S.px[i].t;
+  var ts=chart.timeScale(), x1=ts.timeToCoordinate(from), x2=ts.timeToCoordinate(to);
+  var sp=(ts.options().barSpacing||6)/2;
+  if(x1==null||x2==null){ el.style.display='none'; return; }
+  // 有副圖用到左側價格軸時，整張圖的繪圖區會往右移，要補上左軸寬度
+  var lw=0;
+  try{ var row=chart.panes()[0].getHTMLElement();      // 一列 = [左軸, 繪圖區, 右軸]
+       if(row&&row.cells&&row.cells.length===3) lw=row.cells[1].getBoundingClientRect().left-$('chart').getBoundingClientRect().left; }catch(e){}
+  el.style.display='block'; el.style.left=(lw+x1-sp)+'px'; el.style.width=Math.max(2,(x2-x1)+2*sp)+'px';
+}
+
+/* ---------- 側欄 ---------- */
+function renderSide(){
+  var d=S.sel; if(!d) return;
+  $('selDate').textContent=iso(d)+(S.days>1?' 往前 '+S.days+' 個交易日':'');
+  var w=windowStats(S.code,d,S.days), out=[];
+  if(!w){ $('flow').innerHTML='<div class="empty">沒有這一天的價量資料</div>'; return; }
+  var label = S.days===1 ? '1日籌碼集中' : S.days+'日 每日榜單流量累計比';
+  var tipConc = S.days===1 ? '主力買賣超 ÷ 官方當日成交量' : '這幾天每日「買超前15＋賣超前15」加總 ÷ 官方成交量加總。不等於整段期間重新排名的前15名';
+  if(w.net15==null){
+    out.push('<div class="head none"><span>主力</span><span class="big mu">未觀察到</span></div>');
+  } else if(w.got<w.n){
+    // 區間不完整：不給大字結論，只列出觀察到的部分
+    out.push('<div class="head none"><span>主力（只觀察到 '+w.got+' / '+w.n+' 天）</span><span class="mono '+cls(w.net15)+'">'+fmtS(w.net15)+' 張</span></div>');
+  } else {
+    out.push('<div class="head '+(w.net15>=0?'buy':'sell')+'"><span>主力'+(w.net15>=0?'買超':'賣超')+'</span><span class="big mono '+cls(w.net15)+'">'+fmt0(Math.abs(w.net15))+' 張</span></div>');
+  }
+  out.push('<div class="kv mono">');
+  out.push('<span class="k">官方成交量</span><span class="v">'+fmt0(w.vol)+' 張</span>');
+  out.push('<span class="k">買超前15合計</span><span class="v r">'+(w.buy15==null?'—':fmtS(w.buy15))+'</span>');
+  out.push('<span class="k">賣超前15合計</span><span class="v g">'+(w.sell15==null?'—':fmtS(w.sell15))+'</span>');
+  out.push('<span class="k"><span class="tip" title="'+esc(tipConc)+'">'+label+'</span></span><span class="v '+cls(w.conc)+'">'+(w.conc==null?'—':fmtP(w.conc))+'</span>');
+  out.push('<span class="k"><span class="tip" title="主力買賣超 ÷ 股本（張）">佔股本比重</span></span><span class="v">'+(w.cap==null?'—':fmtP(w.cap,3))+'</span>');
+  if(w.day){
+    out.push('<span class="k"><span class="tip" title="買超第一名 ÷ 買超前15合計">買方第一名佔</span></span><span class="v">'+fmtP(w.day.top1,1).replace('+','')+'</span>');
+    out.push('<span class="k"><span class="tip" title="買超前三名 ÷ 買超前15合計">買方前三名佔</span></span><span class="v">'+fmtP(w.day.top3,1).replace('+','')+'</span>');
+    out.push('<span class="k"><span class="tip" title="賣超第一名 ÷ 賣超前15合計">賣方第一名佔</span></span><span class="v">'+fmtP(w.day.stop1,1).replace('+','')+'</span>');
+  }
+  out.push('<span class="k">有分點資料的天數</span><span class="v">'+w.got+' / '+w.n+'</span>');
+  out.push('</div>');
+  if(w.why) out.push('<div class="note">'+esc(w.why)+'</div>');
+  if(S.days===1 && w.conc!=null && Math.abs(w.conc)>=20)
+    out.push('<div class="note"><span class="badge warn">經驗值</span> 單日籌碼集中超過 20%，文章說「可能有特定人在收集或出脫」。這是教學文章的經驗法則，<b>我們還沒驗證</b>。</div>');
+  $('flow').innerHTML=out.join('');
+
+  // 三大法人
+  var i=idxOf(d), r=S.chip[d];
+  if(!r){ $('inst').innerHTML='<div class="empty">這一天沒有法人資料</div>'; }
+  else {
+    var dl=sumN(r.dS,r.dH), sk=function(k){ var s=streak(k,i); return s? '<span class="mu">（連'+(s>0?'買':'賣')+' '+Math.abs(s)+' 天）</span>':''; };
+    $('inst').innerHTML='<div class="kv mono">'+
+      '<span class="k">外資</span><span class="v"><span class="'+cls(r.fgn)+'">'+fmtS(r.fgn)+'</span> '+sk('fgn')+'</span>'+
+      '<span class="k">投信</span><span class="v"><span class="'+cls(r.inv)+'">'+fmtS(r.inv)+'</span> '+sk('inv')+'</span>'+
+      '<span class="k">自營（自行＋避險）</span><span class="v"><span class="'+cls(dl)+'">'+fmtS(dl)+'</span> '+sk('dlr')+'</span>'+
+      '<span class="k">融資餘額</span><span class="v">'+fmt0(r.mgn)+'</span>'+
+      '<span class="k">融券餘額</span><span class="v">'+fmt0(r.shrt)+'</span>'+
+      '</div>';
+  }
+  renderBrokers();
+}
+function tagOf(name){
+  var c=S.cls[name]; if(!c) return '<span class="mu" title="分類表沒有這個分點">—</span>';
+  if(c.classification_status!=='confirmed') return '<span class="mu" title="尚未分類">—</span>';
+  var t={'外資':'外','官股':'官','本土':'本'}[c.class]||'';
+  return t?'<span class="badge">'+t+'</span>':'—';
+}
+function renderBrokers(){
+  var d=S.sel, rows=bkDay(S.code,d);
+  var st=(S.status[S.code]||{})[d];
+  $('bkSub').textContent=iso(d);
+  if(!rows){
+    var hasAny = S.bk[S.code] && Object.keys(S.bk[S.code]).length;
+    $('bk').innerHTML='<div class="empty">'+(hasAny?'這一天沒有分點資料（未觀察到）':(Object.keys(S.bk).length?'這檔股票還沒有匯入分點資料':'尚未匯入分點資料。按「匯入分點資料」選 GPT 整理的檔案'))+'</div>';
+    return;
+  }
+  var close=(S.px[idxOf(d)]||{}).c;
+  var list=rows.filter(function(r){return r.side===S.side;}).sort(function(a,b){return (+a.rank)-(+b.rank);});
+  var anyCls=Object.keys(S.cls).some(function(k){ return S.cls[k].classification_status==='confirmed'; });
+  var h=['<div class="tw"><table class="bk mono"><thead><tr><th>分點</th>'+(anyCls?'<th>類</th>':'')+'<th>'+(S.side==='buy'?'買超':'賣超')+'</th><th>買張</th><th>賣張</th><th>均價</th><th title="（收盤 − 分點均價）÷ 分點均價">對收盤</th></tr></thead><tbody>'];
+  list.forEach(function(r){
+    var on=S.track.indexOf(r.broker)>=0, ap=num(r.avg_price), n=num(r.net_lots);
+    var gap = ap&&close ? (close-ap)/ap*100 : null;
+    h.push('<tr class="row'+(on?' on':'')+'" data-b="'+esc(r.broker)+'"><td><span class="star">'+(on?'★':'')+'</span><span class="bname" title="'+esc(r.broker)+'">'+esc(r.broker)+'</span></td>'+
+      (anyCls?'<td>'+tagOf(r.broker)+'</td>':'')+'<td class="'+cls(n)+'">'+fmtS(n)+'</td><td>'+(r.buy_lots===''?'<span class="mu" title="來源空白">—</span>':fmt0(num(r.buy_lots)))+'</td>'+
+      '<td>'+(r.sell_lots===''?'<span class="mu" title="來源空白">—</span>':fmt0(num(r.sell_lots)))+'</td><td>'+(ap==null?'—':ap.toFixed(2))+'</td><td class="'+cls(gap)+'">'+fmtP(gap,1)+'</td></tr>');
+  });
+  h.push('</tbody></table></div>');
+  var meta=[]; var hm=rows[0]&&rows[0].history_mode; if(hm==='reconstructed') meta.push('<span class="badge warn" title="事後補抓：只能當觀察值">事後補抓</span>');
+  if(!anyCls) meta.push('<span class="badge" title="GPT 的分類表目前全部是「尚未分類」">分點類別：尚未分類</span>');
+  if(st&&st.branch_status_qc) meta.push('<span class="badge" title="品質判定">QC：'+esc(st.branch_status_qc)+'</span>');
+  $('bk').innerHTML=(meta.length?'<div style="margin-bottom:6px">'+meta.join(' ')+'</div>':'')+h.join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#bk tr.row'),function(tr){
+    tr.onclick=function(){ toggleTrack(tr.getAttribute('data-b')); };
+  });
+}
+function toggleTrack(name){
+  var i=S.track.indexOf(name);
+  if(i>=0) S.track.splice(i,1); else { if(S.track.length>=5) S.track.shift(); S.track.push(name); }
+  if(!S.panes.track){ S.panes.track=true; saveUI(); renderPaneMenu(); }
+  renderTrack(); buildChart(); renderBrokers();
+}
+function renderTrack(){
+  var colors=['--c1','--c3','--c4','--c5','--c2'];
+  $('track').innerHTML = S.track.length ? S.track.map(function(n,k){
+    return '<span class="chip">'+dot(colors[k%colors.length])+esc(n)+'<button data-b="'+esc(n)+'" aria-label="移除 '+esc(n)+'">×</button></span>'; }).join('') :
+    '<span class="note" style="margin:0">還沒有追蹤的分點。在分點明細點一下就會加入，最多 5 個。</span>';
+  Array.prototype.forEach.call(document.querySelectorAll('#track button'),function(b){ b.onclick=function(){ toggleTrack(b.getAttribute('data-b')); }; });
+}
+
+/* ---------- 副圖選單 ---------- */
+function renderPaneMenu(){
+  $('panePop').innerHTML=PANES.map(function(p){
+    return '<label><input type="checkbox" data-k="'+p[0]+'"'+(S.panes[p[0]]?' checked':'')+'> '+p[1]+'</label>'; }).join('')+
+    '<div class="hint">副圖之間的分隔線可以拖曳調整高度。</div>';
+  Array.prototype.forEach.call(document.querySelectorAll('#panePop input'),function(cb){
+    cb.onchange=function(){ S.panes[cb.getAttribute('data-k')]=cb.checked; saveUI(); buildChart(); };
+  });
+}
+$('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
+document.addEventListener('click',function(e){ if(!$('paneMenu').contains(e.target)) $('paneMenu').classList.remove('open'); });
+
+/* ---------- 匯入 ---------- */
+function impStat(){
+  var codes=Object.keys(S.bk), days=0, rows=0;
+  codes.forEach(function(c){ var ds=Object.keys(S.bk[c]); days+=ds.length; ds.forEach(function(d){ rows+=S.bk[c][d].length; }); });
+  $('impStat').innerHTML = codes.length ?
+    '<span class="ok">已載入</span> '+codes.length+' 檔股票、'+days+' 個股票日、'+rows.toLocaleString('en-US')+' 列分點；分類表 '+Object.keys(S.cls).length+' 個分點'+
+    (S.mpRows?'；損益排行 '+S.mpRows+' 列（不用於計算）':'') : '尚未匯入。';
+}
+function onFiles(files){
+  var tasks=Array.prototype.map.call(files,function(f){ return f.text().then(function(t){ return {name:f.name,text:t}; }); });
+  Promise.all(tasks).then(function(list){
+    var msg=[], nB=0, nC=0, nS=0, bad=[];
+    list.forEach(function(f){
+      var rows; try{ rows=parseCSV(f.text); }catch(e){ bad.push(f.name); return; }
+      if(!rows.length){ bad.push(f.name+'（空檔）'); return; }
+      var h=rows[0];
+      if('side' in h && 'net_lots' in h && 'broker' in h){
+        rows.forEach(function(r){
+          var c=r.stock_code, d=(r.trade_date||'').replace(/-/g,''); if(!c||d.length!==8) return;
+          (S.bk[c]=S.bk[c]||{});
+          if(!S.bk[c]._seen) Object.defineProperty(S.bk[c],'_seen',{value:{},enumerable:false,writable:true});
+          if(!S.bk[c]._seen[d+'|'+f.name]){ // 同一檔重新匯入：整天取代
+            S.bk[c][d]=[]; S.bk[c]._seen[d+'|'+f.name]=true; }
+          S.bk[c][d].push({side:r.side,rank:r.rank,broker:r.broker,buy_lots:r.buy_lots,sell_lots:r.sell_lots,
+            net_lots:r.net_lots,avg_price:r.avg_price,history_mode:r.history_mode,broker_class:r.broker_class});
+          nB++;
+        });
+      } else if('classification_status' in h && 'broker' in h){
+        rows.forEach(function(r){ S.cls[r.broker]=r; nC++; });
+      } else if('branch_status_qc' in h){
+        rows.forEach(function(r){ var d=(r.trade_date||'').replace(/-/g,''); (S.status[r.stock_code]=S.status[r.stock_code]||{})[d]=r; nS++; });
+      } else if('ranking_type' in h){
+        S.mpRows+=rows.length;
+      } else bad.push(f.name+'（看不懂的欄位）');
+    });
+    // 去掉輔助標記後存檔
+    var store={}; Object.keys(S.bk).forEach(function(c){ store[c]={}; Object.keys(S.bk[c]).forEach(function(d){ store[c][d]=S.bk[c][d]; }); });
+    idbPut('data',{bk:store,cls:S.cls,status:S.status,mpRows:S.mpRows}).then(function(ok){
+      impStat();
+      $('impStat').innerHTML+='<br>這次讀到：分點 '+nB+' 列、分類 '+nC+' 列、狀態 '+nS+' 列'+(bad.length?'；<span class="bad">無法讀取：'+esc(bad.join('、'))+'</span>':'')+(ok?'':'；<span class="bad">瀏覽器不允許存檔，關掉頁面後要重新匯入</span>');
+      // 目前這檔有分點資料、但選的日子沒有 → 跳到最後一個有分點的日子
+      var bk=S.bk[S.code];
+      if(bk && !bk[S.sel]){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
+      fillData(); renderSide(); renderTrack(); drawBand();
+    });
+  });
+}
+$('impBtn').onclick=$('impBtn2').onclick=function(){ $('impFile').click(); };
+$('impFile').onchange=function(){ if(this.files&&this.files.length) onFiles(this.files); this.value=''; };
+$('clrBtn').onclick=function(){ idbClear().then(function(){ S.bk={}; S.cls={}; S.status={}; S.mpRows=0; S.track=[]; impStat(); renderTrack(); buildChart(); renderSide(); }); };
+
+/* ---------- 切換 ---------- */
+function bindSeg(id,attr,fn){
+  Array.prototype.forEach.call($(id).querySelectorAll('button'),function(b){
+    b.onclick=function(){ Array.prototype.forEach.call($(id).querySelectorAll('button'),function(x){ x.classList.toggle('on',x===b); }); fn(b.getAttribute(attr)); };
+  });
+}
+bindSeg('range','data-m',function(v){ S.months=+v; saveUI(); applyRange(); });
+bindSeg('days','data-n',function(v){ S.days=+v; renderSide(); drawBand(); });
+bindSeg('side','data-s',function(v){ S.side=v; renderBrokers(); });
+Array.prototype.forEach.call($('range').querySelectorAll('button'),function(b){ b.classList.toggle('on',+b.getAttribute('data-m')===S.months); });
+
+function open(code){
+  code=String(code||'').trim().split(/\s+/)[0];
+  if(!code) return;
+  if(!/^[0-9A-Z]{4,6}$/i.test(code)){ // 用名稱找
+    for(var c in S.names) if(S.names[c]===code){ code=c; break; }
+  }
+  $('info').textContent='載入 '+code+'…';
+  loadStock(code).then(function(r){
+    S.code=code; S.px=r[0]; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
+    S.sel = S.px.length ? S.px[S.px.length-1].d : null;
+    // 有分點資料時，預設選最後一個有分點的交易日
+    var bk=S.bk[code]; if(bk){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
+    try{ history.replaceState(null,'','#'+code); }catch(e){}
+    $('q').value=code+' '+(S.names[code]||'');
+    buildChart(); renderSide(); renderTrack();
+  }).catch(function(){ $('info').innerHTML='<span class="bad">找不到 '+esc(code)+' 的資料</span>'; });
+}
+$('qf').onsubmit=function(e){ e.preventDefault(); open($('q').value); };
+
+var mq=window.matchMedia('(prefers-color-scheme: dark)');
+if(mq.addEventListener) mq.addEventListener('change',function(){ if(chart) buildChart(); });
+
+if(!LC){ $('info').innerHTML='<span class="bad">圖表元件載入失敗，請檢查網路後重新整理。</span>'; return; }
+renderPaneMenu();
+Promise.all([loadNames(),loadShares(),idbGet('data')]).then(function(r){
+  var saved=r[2];
+  if(saved){ S.bk=saved.bk||{}; S.cls=saved.cls||{}; S.status=saved.status||{}; S.mpRows=saved.mpRows||0; }
+  impStat();
+  open((location.hash||'').slice(1)||'1101');
+});
+})();
+</script>
+</body>
+</html>

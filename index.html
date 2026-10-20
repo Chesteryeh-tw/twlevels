@@ -181,6 +181,16 @@ button,input,select,textarea{font:inherit;color:inherit}
 .preset.bull{border-color:var(--res-bg);color:var(--res)}
 .preset.bear{border-color:var(--sup-bg);color:var(--sup)}
 .presets-note{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+.preset .bt{display:inline-block;margin-left:6px;font-size:11px;padding:0 6px;border-radius:999px;border:1px solid currentColor;opacity:.9;font-weight:500}
+.preset .bt.dn,.preset .bt.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)}
+.preset .bt.up{color:var(--res);background:var(--res-bg);border-color:var(--res)}
+.preset .bt.no{color:var(--muted)}
+.btbox{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 8px;font-size:13px;line-height:1.6}
+.btbox.dn,.btbox.warn{border-color:var(--warn);background:var(--warn-bg)}
+.btbox.up{border-color:var(--res);background:var(--res-bg)}
+.btbox b.h{font-size:14px}
+.mkt-ix b.r{color:var(--res)} .mkt-ix b.g{color:var(--sup)}
+.navlink{font-size:13px;color:var(--accent);text-decoration:none;white-space:nowrap;margin-left:12px;letter-spacing:0;font-weight:500}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px 18px}
 .field{display:flex;flex-direction:column;gap:5px}
 .field > label{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500}
@@ -300,7 +310,7 @@ details.manual[open]{padding-bottom:16px}
 
 <div class="strip">
   <div class="strip-in">
-    <div class="brand">TW&thinsp;LEVELS <span>/ 三線點位</span></div>
+    <div class="brand">TW&thinsp;LEVELS <span>/ 三線點位</span> <a class="navlink" href="chips.html">籌碼看板 →</a></div>
     <div class="readout" id="readout"></div>
     <button class="refresh" id="refresh">更新</button>
   </div>
@@ -346,6 +356,7 @@ details.manual[open]{padding-bottom:16px}
         <button class="preset bear" data-preset="p5">月線下彎量增跌</button>
         <button class="preset bear" data-preset="p6">價背離空（半套）</button>
         <button class="preset" data-preset="p7">隔日沖出貨警示</button>
+        <button class="preset bull" data-preset="b4">貼上軌強勢走</button>
         <button class="preset bull" data-preset="b1">往上帶量開布林</button>
         <button class="preset bear" data-preset="b2">往下帶量開布林</button>
         <button class="preset bear" data-preset="b3">反彈放空點</button>
@@ -366,7 +377,8 @@ details.manual[open]{padding-bottom:16px}
         <div class="field"><label for="f-val">成交金額 ≥（億）</label><input id="f-val" inputmode="decimal" value="1"></div>
         <div class="field"><label for="f-lot">成交量 ≥（張）</label><input id="f-lot" inputmode="decimal"></div>
         <div class="field"><label for="f-turn">週轉率 ≥（%）</label><input id="f-turn" inputmode="decimal"></div>
-        <div class="field"><label for="f-amp">振幅 ≥（%）</label><input id="f-amp" inputmode="decimal"></div>
+        <div class="field"><label for="f-amp">今日振幅 ≥（%）</label><input id="f-amp" inputmode="decimal"></div>
+        <div class="field"><label for="f-ampy">前日振幅 ≥（%）</label><input id="f-ampy" inputmode="decimal"></div>
         <div class="field"><label for="f-chg1">漲跌幅（%）</label>
           <div class="range"><input id="f-chg1" inputmode="decimal" placeholder="-10"><span>～</span><input id="f-chg2" inputmode="decimal" placeholder="10"></div></div>
         <div class="field"><label for="f-pos1">收盤位置</label>
@@ -388,6 +400,7 @@ details.manual[open]{padding-bottom:16px}
         <div class="field"><label for="f-wchg">帶寬變化 ≥（開布林）</label><input id="f-wchg" inputmode="decimal"></div>
         <div class="field"><label for="f-wmin">擠壓：前10日最小帶寬 ≤（%）</label><input id="f-wmin" inputmode="decimal" placeholder="10"></div>
         <div class="field"><label for="f-supt2">上通斜率 ≥（%）</label><input id="f-supt2" inputmode="decimal"></div>
+        <div class="field"><label for="f-bwy" title="昨日帶寬 = 今日帶寬 − 今日帶寬變化。要求「昨天還是縮的、今天才打開」，避免選到已經開完的">昨日帶寬 ≤（%）</label><input id="f-bwy" inputmode="decimal"></div>
         <div class="field"><label for="f-slot">下通斜率 ≤（%）</label><input id="f-slot" inputmode="decimal"></div>
         <div class="field"><label for="f-invd">投信連買 ≥（天）</label><input id="f-invd" inputmode="decimal"></div>
         <div class="field"><label for="f-inv">投信買超 ≥（張）</label><input id="f-inv" inputmode="decimal"></div>
@@ -412,7 +425,7 @@ details.manual[open]{padding-bottom:16px}
             <option value="fgn">外資買賣超</option><option value="fgnD">外資連買天數</option>
             <option value="bigChg">大戶週增減</option><option value="big">大戶持股比率</option>
             <option value="mgnRate">融資維持率</option><option value="smallChg">散戶週增減</option><option value="holdersChg">集保戶數週增減</option><option value="sr">券資比</option><option value="mgnChg">融資增減</option>
-            <option value="width">三線帶寬</option><option value="ampPct">振幅%</option>
+            <option value="width">三線帶寬</option><option value="ampPct">今日振幅%</option><option value="ampY">前日振幅%</option>
             <option value="chgPct">漲跌幅%</option><option value="pos">收盤位置</option>
             <option value="close">股價</option>
             <option value="vol">成交量(張)</option><option value="runNet">連漲／連跌</option>
@@ -716,7 +729,9 @@ function indicators(bars){
 /* ==================== 三線點位 ==================== */
 function calc(r){
   var a=r.h-r.l, o={};
-  o.amp=a; o.ampPct = r.c>0 ? a/r.c*100 : 0; o.flat = a<=0;
+  var pc0=(r.chg===null||r.chg===undefined)?null:(r.c-r.chg);       // 昨收
+  // 振幅 % =（最高 − 最低）÷ 昨收，跟券商軟體一樣；沒有昨收才退回今收
+  o.amp=a; o.ampPct = (pc0&&pc0>0) ? a/pc0*100 : (r.c>0 ? a/r.c*100 : 0); o.flat = a<=0;
   o.res = roundTick(r.c+.75*a);
   o.mid = roundTick((r.h+r.l+2*r.c)/4);
   o.sup = roundTick(r.c-.75*a);
@@ -786,7 +801,8 @@ function parseDaily(txt){
       slopeUp:num0(p[10]),slopeLo:num0(p[11]),biasY:num0(p[12]),
       runUp:num0(p[13])||0,runDn:num0(p[14])||0,vr20:num0(p[15]),vrY:num0(p[16]),
       ndays:num0(p[17])||0,
-      bbWChg:(p.length>18?num0(p[18]):null), bbWMin10:(p.length>19?num0(p[19]):null)};
+      bbWChg:(p.length>18?num0(p[18]):null), bbWMin10:(p.length>19?num0(p[19]):null),
+      ampY:(p.length>20?num0(p[20]):null)};
   }
   return {meta:{date:hp[1]||'',fetched:hp[2]||''}, map:map};
 }
@@ -866,6 +882,15 @@ function loadServer(manual){
     })
     .catch(function(){ return null; });
 
+  var pIdx=fetch('data/index_taiex.txt?t='+Date.now(),{cache:'no-store'})
+    .then(function(r){ return r.ok?r.text():null; })
+    .then(function(t){
+      if(!t) return null;
+      var rows=[]; t.split('\n').forEach(function(l){ if(!l||l[0]==='#') return; var p=l.split(',');
+        if(p.length===5) rows.push({d:p[0],o:+p[1],h:+p[2],l:+p[3],c:+p[4]}); });
+      state.taiex=rows; return rows;
+    }).catch(function(){ return null; });
+
   var pChips=fetch('data/chips.txt?t='+Date.now(),{cache:'no-store'})
     .then(function(r){ return r.ok?r.text():null; })
     .then(function(t){
@@ -875,7 +900,7 @@ function loadServer(manual){
     })
     .catch(function(){ return null; });
 
-  Promise.all([pMarket,pDaily,pDays,pChips]).then(function(res){
+  Promise.all([pMarket,pDaily,pDays,pChips,pIdx]).then(function(res){
     renderAll();
     if(manual) say('已讀取：資料日 '+prettyDate(res[0].meta.date)+'，共 '+res[0].rows.length+' 檔'+
       (res[1]?('，指標 '+Object.keys(state.ind).length+' 檔'):'，指標檔還沒產生')+
@@ -941,6 +966,25 @@ function prettyFetched(s){
   return s.slice(4,6)+'-'+s.slice(6,8)+' '+s.slice(8,10)+':'+s.slice(10,12);
 }
 
+// 大盤：加權指數（官方）＋上市／上櫃「等權平均漲跌」（每檔一票，不被台積電主導）
+function mktHTML(){
+  var h=[], tx=state.taiex, d=state.meta&&state.meta.date;
+  if(tx&&tx.length>1){
+    var i=-1; for(var k=tx.length-1;k>=0;k--){ if(tx[k].d===d){ i=k; break; } }
+    if(i>0){ var x=tx[i], pc=tx[i-1].c, ch=x.c-pc;
+      h.push('<span class="mkt-ix" title="加權指數：收盤、漲跌、振幅（最高−最低）÷ 昨收">加權 <b class="'+(ch>=0?'r':'g')+'">'+
+        x.c.toLocaleString('en-US',{maximumFractionDigits:2})+'　'+(ch>=0?'+':'')+ch.toFixed(2)+'（'+(ch>=0?'+':'')+(ch/pc*100).toFixed(2)+'%）</b>　振幅 <b>'+
+        ((x.h-x.l)/pc*100).toFixed(2)+'%</b></span>'); }
+  }
+  var s={'1':[0,0],'2':[0,0]};
+  for(var j=0;j<state.rows.length;j++){ var r=state.rows[j]; if(r.chg===null||r.chg===undefined) continue;
+    var pv=r.c-r.chg; if(!(pv>0)||!s[r.mkt]) continue; s[r.mkt][0]+=r.chg/pv*100; s[r.mkt][1]++; }
+  ['1','2'].forEach(function(m){ var a=s[m]; if(!a[1]) return; var v=a[0]/a[1];
+    h.push('<span class="mkt-ix" title="'+(m==='1'?'上市':'上櫃')+'每一檔漲跌幅的平均（每檔一票）。櫃買指數官方歷史還沒接上，先用這個看小型股強弱">'+
+      (m==='1'?'上市':'上櫃')+'等權 <b class="'+(v>=0?'r':'g')+'">'+(v>=0?'+':'')+v.toFixed(2)+'%</b></span>'); });
+  return h.join('');
+}
+
 function renderReadout(){
   var el=document.getElementById('readout');
   if(state.empty){
@@ -954,6 +998,7 @@ function renderReadout(){
     '<span>資料日 <b>'+prettyDate(state.meta.date)+'</b></span>'+
     '<span>上市 <b>'+a+'</b>　上櫃 <b>'+b+'</b></span>'+
     '<span>更新 <b>'+prettyFetched(state.meta.fetched)+'</b></span>'+
+    mktHTML()+
     mrHeadHTML()+
     freshBadge(state.meta.date);
   document.getElementById('foot').innerHTML =
@@ -1134,11 +1179,47 @@ function runQuery(){
 var scanRes=[], shown=0;
 function num(id){var el=document.getElementById(id);if(!el)return null;var v=el.value.trim();if(v==='')return null;var x=parseFloat(v);return isFinite(x)?x:null;}
 function setv(id,v){var el=document.getElementById(id);if(el)el.value=(v===null||v===undefined)?'':v;}
-var F=['f-val','f-lot','f-turn','f-amp','f-chg1','f-chg2','f-pos1','f-pos2','f-px1','f-px2',
+var F=['f-val','f-lot','f-turn','f-amp','f-ampy','f-chg1','f-chg2','f-pos1','f-pos2','f-px1','f-px2',
        'f-slope1','f-slope2','f-bpos1','f-bpos2','f-bw1','f-bw2','f-bias1','f-bias2',
-       'f-vr','f-runup','f-rundn','f-supt','f-wchg','f-wmin','f-supt2','f-slot',
+       'f-vr','f-runup','f-rundn','f-supt','f-wchg','f-wmin','f-supt2','f-slot','f-bwy',
        'f-invd','f-inv','f-invs','f-fgn','f-fgnd','f-bigc','f-big','f-sr',
        'f-mgnc1','f-mgnc2','f-mr1','f-mr2'];
+
+/* ==================== 回測標籤（data/bt_tags.json，由 bttags.py 產生） ====================
+   判準和回測報告完全相同（btreport.auto_tag）。選股當下就看到「反指標」，不用事後翻報告。 */
+var BT=null;
+var BT_NOTEST={c1:'需要券商分點資料，還沒辦法回測',c3:'集保只有最近幾週，還沒辦法回測',p7:null};
+function btCred(t){ var a=Math.abs(t||0); return a>=3?'高':(a>=2?'中':'低'); }
+function btShort(k){
+  if(BT_NOTEST[k]) return {cls:'no',txt:'無法回測'};
+  var x=BT&&BT.tags&&BT.tags[k]; if(!x) return null;
+  if(x.cls==='dn') return {cls:'dn',txt:'⚠ 反指標'};
+  if(x.cls==='warn') return {cls:'warn',txt:'⚠ 只當濾網'};
+  if(x.cls==='up') return {cls:'up',txt:'✓ '+x.tag};
+  return {cls:'no',txt:'未驗證'};
+}
+function btBox(k){
+  if(BT_NOTEST[k]) return '<div class="btbox"><b class="h">回測：無法回測</b>　'+BT_NOTEST[k]+'。</div>';
+  var x=BT&&BT.tags&&BT.tags[k]; if(!x) return '';
+  var days=BT.days?(BT.days.toLocaleString('en-US')+' 個交易日'):'';
+  var head, cls=x.cls;
+  if(cls==='dn') head='⚠ 反指標（'+x.tag.replace(/^反指標（|）$/g,'')+'）：照這個方向進場會穩定賠，可信度'+btCred(x.t)+'（反向）';
+  else if(cls==='warn') head='⚠ 贏大盤但賠錢：只能當「不要碰」的濾網，不能拿來進場';
+  else if(cls==='up') head='✓ '+x.tag+'：扣成本後淨 '+(x.net>0?'+':'')+x.net.toFixed(2)+'%，可信度'+btCred(x.t);
+  else head='未通過驗證：數字再漂亮也可能是雜訊，當參考就好';
+  return '<div class="btbox '+cls+'"><b class="h">回測（'+days+'）'+head+'</b><br>'+esc((x.why||'').replace('輸大盤 +','輸大盤 '))+'</div>';
+}
+function decoratePresets(){
+  var bs=document.querySelectorAll('.preset[data-preset]');
+  for(var i=0;i<bs.length;i++){
+    var k=bs[i].getAttribute('data-preset'), b=btShort(k);
+    var old=bs[i].querySelector('.bt'); if(old) old.parentNode.removeChild(old);
+    if(!b) continue;
+    var sp=document.createElement('span'); sp.className='bt '+b.cls; sp.textContent=b.txt; bs[i].appendChild(sp);
+  }
+}
+fetch('data/bt_tags.json?t='+Date.now(),{cache:'no-store'}).then(function(r){ return r.ok?r.json():null; })
+  .then(function(j){ if(j){ BT=j; decoratePresets(); } }).catch(function(){});
 
 var PRESETS={
   p1:{note:'多方策略2＋做多結論：月線上升、站上月線、位階翻正、量能放大。Phase 3 接上投信連買後會更準。',
@@ -1159,9 +1240,9 @@ var PRESETS={
       s:{val:1,vr:3,chg1:5,sort:'vr20'}},
   b1:{note:'日線「擠壓 → 張口」：前 10 日帶寬曾壓到 10% 以下（上下軌極度壓縮、幾乎沒波動），今天帶寬突然拉開，上軌斜率向上 &gt; 1%，股價往上突破，<b>而且要帶量</b>（均量比 ≥ 1.5）—— 講義原文是「往上<b>帶量</b>開布林是個好買點」，沒量的張口不算真發動。' +
         '<br><b>盤後務必補一步：</b>去查籌碼面有沒有主力（大戶、關鍵分點）買盤進駐。只有散戶在買的張口，很容易是假突破。這一段本站還抓不到，要自己到券商看盤軟體對一次。',
-      s:{val:1,wchg:0.5,supt2:1,bpos1:0,chg1:1,vr:1.5,wmin:10,sort:'bbWChg'}},
+      s:{val:1,wchg:0.5,supt2:1,bpos1:0,chg1:1,vr:1.5,wmin:10,bwy:15,sort:'bbWChg'}},
   b2:{note:'反過來的「擠壓 → 往下張口」：前 10 日曾壓縮到 10% 以下，今天帶寬拉開但下軌往下走（斜率 &lt; −1%）、位階為負，<b>而且要帶量</b>下殺 —— 講義原文「往下<b>帶量</b>開布林是個好空點」。同樣要回頭確認是不是主力在倒貨。',
-      s:{val:1,wchg:0.5,slot:-1,bpos2:0,chg2:-1,vr:1.5,wmin:10,supt:3,sort:'bbWChg'}},
+      s:{val:1,wchg:0.5,slot:-1,bpos2:0,chg2:-1,vr:1.5,wmin:10,supt:3,bwy:15,sort:'bbWChg'}},
   c1:{note:'<b>開布林＋主力確認</b>：b1 的「擠壓 → 張口」條件，再加上投信連買 2 天以上、大戶持股比率當週增加。'+
         '這就是你說的那道關卡 —— 張口如果只有散戶在買，很容易是假突破；有投信與千張大戶同時進場，才算有人撐。'+
         '<br>注意：分點主力還是拿不到，這裡用的是投信與大戶，方向對但沒有分點細。',
@@ -1190,6 +1271,11 @@ var PRESETS={
         '空單要等弱勢股反彈到通道上緣才進，停損才抓得住。<br>'+
         '上軌斜率 ≤ 3% 這個條件是講義做空實務原文的避開條件：上軌還在往外開的股票不能空，強勢股嘎空太恐怖。',
       s:{val:1,slope2:0,bpos1:0,supt:3,sort:'bbPos'}},
+  b4:{note:'<b>貼上軌強勢走</b>：收盤貼著布林上軌（位階 ≥ 8），而且上軌還在往外開（上通斜率 ≥ 3%）。'+
+        '<br><b>出場</b>：回測裡最好的是「<b>收盤跌破月線，隔天開盤賣</b>」，平均抱 14.4 天。'+
+        '用「離開上軌的黑K」就出場反而會把優勢殺光（平均 3.7 天就被洗掉）。'+
+        '<br>這是目前<b>唯一</b>經過 1,336 天長樣本驗證、扣成本還賺錢的條件；2022 空頭年是負的，盤勢轉空時要小心。',
+      s:{val:1,bpos1:8,supt2:3,sort:'slopeUp'}},
   hot:{note:'高週轉、高振幅，純粹找今天最會動的。',
       s:{val:1,turn:10,amp:5,sort:'turn'}},
   reset:{note:'把所有條件清空，自己從頭設。',s:{}}
@@ -1203,6 +1289,7 @@ function applyPreset(p){
   setv('f-lot', s.lot===undefined?null:s.lot);
   setv('f-turn',s.turn===undefined?null:s.turn);
   setv('f-amp', s.amp===undefined?null:s.amp);
+  setv('f-ampy',s.ampy===undefined?null:s.ampy);
   setv('f-chg1',s.chg1===undefined?null:s.chg1);
   setv('f-chg2',s.chg2===undefined?null:s.chg2);
   setv('f-pos1',s.pos1===undefined?null:s.pos1);
@@ -1223,6 +1310,7 @@ function applyPreset(p){
   setv('f-supt',s.supt===undefined?null:s.supt);
   setv('f-wchg',s.wchg===undefined?null:s.wchg);
   setv('f-wmin',s.wmin===undefined?null:s.wmin);
+  setv('f-bwy', s.bwy===undefined?null:s.bwy);
   setv('f-supt2',s.supt2===undefined?null:s.supt2);
   setv('f-slot',s.slot===undefined?null:s.slot);
   setv('f-invd',s.invd===undefined?null:s.invd);
@@ -1239,12 +1327,12 @@ function applyPreset(p){
   setv('f-mr2',s.mr2===undefined?null:s.mr2);
   document.getElementById('f-sort').value=s.sort||'val';
   document.getElementById('f-dir').value=s.dir||'desc';
-  document.getElementById('pnote').innerHTML=P.note;
+  document.getElementById('pnote').innerHTML=btBox(p)+P.note;
   runScan();
 }
 
 // 排序：哪些 key 要去哪個物件拿值。表頭點擊和「排序依據」下拉用的是同一套。
-var INDKEYS={slope20:1,bbPos:1,bbW:1,biasY:1,vr20:1,bbWChg:1,slopeUp:1,slopeLo:1,bbWMin10:1,vrY:1};
+var INDKEYS={ampY:1,slope20:1,bbPos:1,bbW:1,biasY:1,vr20:1,bbWChg:1,slopeUp:1,slopeLo:1,bbWMin10:1,vrY:1};
 var CHIPKEYS={mgnRate:1,mgnCost:1,inv:1,invD:1,fgn:1,fgnD:1,big:1,bigChg:1,sr:1,mgnChg:1,dlrH:1,mgn:1,shrt:1,small:1,smallChg:1,holders:1,holdersChg:1};
 /* ==================== 多空傾向 ====================
    規則全部照《權證小哥 7 小時多空實戰新手班》講義原文，不是我自己配的。
@@ -1510,12 +1598,12 @@ function runScan(){
   var w1=num('f-bw1'),w2=num('f-bw2');
   var y1=num('f-bias1'),y2=num('f-bias2');
   var vr=num('f-vr'),ru=num('f-runup'),rd=num('f-rundn'),st=num('f-supt');
-  var wc=num('f-wchg'),wm=num('f-wmin'),st2=num('f-supt2'),sl=num('f-slot');
+  var wc=num('f-wchg'),wm=num('f-wmin'),st2=num('f-supt2'),sl=num('f-slot'),ay=num('f-ampy'),bwy=num('f-bwy');
   var invd=num('f-invd'),inv=num('f-inv'),invs=num('f-invs');
   var fgn=num('f-fgn'),fgnd=num('f-fgnd');
   var bigc=num('f-bigc'),big=num('f-big'),sr=num('f-sr');
   var mg1=num('f-mgnc1'),mg2=num('f-mgnc2'),mr1=num('f-mr1'),mr2=num('f-mr2');
-  var needInd = s1!==null||s2!==null||b1!==null||b2!==null||w1!==null||w2!==null||
+  var needInd = bwy!==null||ay!==null||s1!==null||s2!==null||b1!==null||b2!==null||w1!==null||w2!==null||
                 y1!==null||y2!==null||vr!==null||ru!==null||rd!==null||st!==null||
                 wc!==null||wm!==null||st2!==null||sl!==null;
   var needChip = invd!==null||inv!==null||invs!==null||fgn!==null||fgnd!==null||
@@ -1555,6 +1643,8 @@ function runScan(){
       if(st2!==null && (!nn(d.slopeUp)||d.slopeUp<st2)) continue;
       if(sl!==null && (!nn(d.slopeLo)||d.slopeLo>sl)) continue;
       if(wc!==null && (!nn(d.bbWChg)||d.bbWChg<wc)) continue;
+      if(ay!==null && (!nn(d.ampY)||d.ampY<ay)) continue;
+      if(bwy!==null && (!nn(d.bbW)||!nn(d.bbWChg)||d.bbW-d.bbWChg>bwy)) continue;
       if(wm!==null && (!nn(d.bbWMin10)||d.bbWMin10>wm)) continue;
     }
     if(needChip){

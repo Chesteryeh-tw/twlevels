@@ -28,6 +28,8 @@
 """
 
 import os
+import csv
+import bisect
 import sys
 import json
 import random
@@ -145,6 +147,40 @@ def load_market_meta():
     return info
 
 
+def load_revenue():
+    """月營收（revenue_fetch.py 產生的 data/revenue/panel.csv）。沒有就回空的，回測照舊。
+    回傳 code -> 依可用日排序的 [(cut, yoy, 創12個月新高)]：M 月營收在 M+1 月 11 日（含）以後的開盤才用得到。"""
+    p = os.path.join("data", "revenue", "panel.csv")
+    out = defaultdict(list)
+    if not os.path.exists(p):
+        return out
+    raw = defaultdict(dict)
+    for r in csv.DictReader(open(p, encoding="utf-8")):
+        try:
+            raw[r["code"]][r["ym"]] = (float(r["rev"]), float(r["rev_ly"]) if r["rev_ly"] else None)
+        except (ValueError, KeyError):
+            continue
+    for code, mm in raw.items():
+        yms = sorted(mm)
+        for ym in yms:
+            a, b = mm[ym]
+            if b is None or b <= 0:
+                continue
+            y, m = int(ym[:4]), int(ym[4:])
+            # 創 12 個月新高：大於前 11 個月最大值（前 11 個月要齊）
+            prev = []
+            yy, mo = y, m
+            for _ in range(11):
+                yy, mo = (yy - 1, 12) if mo == 1 else (yy, mo - 1)
+                prev.append(mm.get("%d%02d" % (yy, mo)))
+            new_high = all(prev) and a > max(x[0] for x in prev)
+            y2, m2 = (y + 1, 1) if m == 12 else (y, m + 1)
+            out[code].append(("%d%02d11" % (y2, m2), a / b - 1, new_high))
+    for v in out.values():
+        v.sort()
+    return out
+
+
 def load_chip_days():
     days = C.chip_days()
     return days, {d: C.read_day(d) for d in days}
@@ -260,6 +296,33 @@ PRESETS = {
     #     教材是對的，所以這裡把它單獨拉出來測，而且刻意不設持有期限制，
     #     讓報告自己標出「只能短空」。
     "s1": ("強勢股隔日空", "空", dict(val=1, lot=1000, supt2=3)),
+    # ── 2026-10-10：把「往上帶量開布林」拆成好、壞兩種（門檻在 2025-09~2026-10 約 280 天上找的）──
+    # 這兩條是樣本外驗證：2021-02~2025-08 的 1,100 天完全沒被拿來挑門檻。
+    # b1g：收在高點（收盤位置 > 0.71）、上影短（≤ 0.27）、量放大但沒爆（均量比 ≤ 5.26）、
+    #      當天大漲（> 6.8%）、成交金額 > 7 億。外資條件需要籌碼歷史，這裡先不放。
+    "b1g": ("開布林·好的那種", "多", dict(val=7.14, wchg=0.5, supt2=1, bpos1=0, chg1=6.8, vr=1.5,
+                                    vr2=5.26, wmin=10, bwy=15, pos1=0.71, ush2=0.27)),
+    # b1x：收在中低位置、上影長、爆量 > 5 倍 —— 盤中拉高被倒貨的樣子
+    "b1x": ("開布林·爆量長上影", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=5.26,
+                                     wmin=10, bwy=15, pos2=0.71, ush1=0.27)),
+    # ── 2026-10-18：使用者定義「盤整後第一天開口打開，隔天追」。近一年約 230 天探索（study/b1_cond.py）：
+    #    b1 裡約 27% 昨天其實就已經在開（不是首日），10 天超額 −2.88%（t −3.1）；首日 −1.15%（t −1.4）。
+    #    量增昨日、投信、外資、主力分個股版／市場版都沒把它翻正。
+    #    事先登記（樣本外 2021-02～2025-08）：b1f 的 10 天超額仍高於 b1n。b1fi、b1ff 要等籌碼歷史補到 2021。
+    "b1f": ("開布林·首日", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                wmin=10, bwy=15, first=1)),
+    "b1n": ("開布林·非首日（對照）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                      wmin=10, bwy=15, first=0)),
+    "b1fi": ("開布林·首日＋投信買", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                     wmin=10, bwy=15, first=1, inv=1)),
+    "b1ff": ("開布林·首日＋外資買", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                     wmin=10, bwy=15, first=1, fgn=1)),
+    # ── 2026-10-19 和碩 4938 案例（研究_開布林 第 7 節）：發動的關鍵是 9 月營收創新高，不是籌碼前兆。
+    #    事先登記：b1fr（首日＋最近一期營收創 12 個月新高且年增 > 0）的 10 天超額高於 b1fq（首日、營收沒創新高）。
+    "b1fr": ("開布林·首日＋營收創新高", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                        wmin=10, bwy=15, first=1, rnew=1)),
+    "b1fq": ("開布林·首日·營收沒創新高（對照）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                            wmin=10, bwy=15, first=1, rnew=0)),
     # b4：教材「上通斜率在高點、沿著布林上軌 ＝ 強勢上漲發動中」。
     #     跟 b1（擠壓→剛打開）是兩件事：b1 抓發動那一天，b4 抓發動中。
     #     狀態轉移統計：這批股票 5 天內掉到中軌以下只有 4.4%，
@@ -473,6 +536,14 @@ EXIT_PRESETS = {
     "x2b": ("貼上軌強勢走→跌破月線賣", "多",
             dict(val=1, bpos1=8, supt2=3),
             dict(belowma=True, maxd=20)),
+    # ── 2026-10-19 月營收濾網（研究_免費資料因子 第 5 節事先登記）：最近一期月營收年增 > 0 vs ≤ 0 ──
+    #    看兩組淨報酬的差；驗證期 2025-01～2026-08。沒有 data/revenue/panel.csv 時兩組都是 0 筆。
+    "x2by": ("貼上軌強勢走→跌破月線賣·營收年增>0", "多",
+             dict(val=1, bpos1=8, supt2=3, ryoy=1),
+             dict(belowma=True, maxd=20)),
+    "x2bn": ("貼上軌強勢走→跌破月線賣·營收年增≤0", "多",
+             dict(val=1, bpos1=8, supt2=3, ryoy=0),
+             dict(belowma=True, maxd=20)),
     "x2s": ("貼上軌強勢走→離開上軌黑K賣＋停損7%", "多",
             dict(val=1, bpos1=8, supt2=3),
             dict(leaveup=8, stop=-7, maxd=20)),
@@ -492,6 +563,12 @@ EXIT_PRESETS = {
     "x5": ("投信認養股→跌破月線賣", "多",
            dict(val=1, invd=3, slope1=0, bpos1=0),
            dict(belowma=True, maxd=20)),
+    "x5y": ("投信認養股→跌破月線賣·營收年增>0", "多",
+            dict(val=1, invd=3, slope1=0, bpos1=0, ryoy=1),
+            dict(belowma=True, maxd=20)),
+    "x5n": ("投信認養股→跌破月線賣·營收年增≤0", "多",
+            dict(val=1, invd=3, slope1=0, bpos1=0, ryoy=0),
+            dict(belowma=True, maxd=20)),
     # ── 對照與校驗 ────────────────────────────────────────────
     # 對照組：隨機 30 檔，但套上「一模一樣的出場規則」。
     #
@@ -523,7 +600,7 @@ EXIT_PRESETS = {
               dict(maxd=5)),
 }
 EXIT_CONTROL = {"xr", "xr2", "xr3", "xr4", "xr5"}
-EXIT_NEED_CHIP = {"x5"}
+EXIT_NEED_CHIP = {"x5", "x5y", "x5n"}
 EXIT_NEED_MA240 = {"x3", "x3m"}
 
 
@@ -545,6 +622,12 @@ def passes(s, base, d, k):
     if g("pos1") is not None and base["pos"] < g("pos1"):
         return False
     if g("pos2") is not None and base["pos"] > g("pos2"):
+        return False
+    if g("ush2") is not None and (base.get("ush") is None or base["ush"] > g("ush2")):
+        return False
+    if g("ush1") is not None and (base.get("ush") is None or base["ush"] < g("ush1")):
+        return False
+    if g("vr2") is not None and (d.get("vr20") is None or d["vr20"] > g("vr2")):
         return False
 
     pairs = [("slope1", "slope20", "min"), ("slope2", "slope20", "max"),
@@ -574,6 +657,35 @@ def passes(s, base, d, k):
         if d.get("bbW") is None or d.get("bbWChg") is None:
             return False
         if d["bbW"] - d["bbWChg"] > g("bwy"):
+            return False
+    # first：1＝今天是開口第一天（昨天帶寬還沒變寬 0.5 點以上、或上軌還沒往上 1%）；
+    #        0＝昨天就已經在開（對照組）。昨天沒有指標（例如鎖漲停沒振幅）一律不選。
+    if g("first") is not None:
+        pw, ps = d.get("_pW"), d.get("_pS")
+        if pw is None or ps is None:
+            return False
+        opened = pw >= 0.5 and ps >= 1
+        if g("first") == 1 and opened:
+            return False
+        if g("first") == 0 and not opened:
+            return False
+    # ryoy：1＝最近一期月營收年增 > 0；0＝≤ 0。沒有營收資料一律不選。
+    if g("ryoy") is not None:
+        y = d.get("_ryoy")
+        if y is None:
+            return False
+        if g("ryoy") == 1 and not y > 0:
+            return False
+        if g("ryoy") == 0 and y > 0:
+            return False
+    # rnew：1＝最近一期月營收創 12 個月新高且年增 > 0；0＝不是。沒有營收資料一律不選。
+    if g("rnew") is not None:
+        y = d.get("_rnew")
+        if y is None:
+            return False
+        if g("rnew") == 1 and not y:
+            return False
+        if g("rnew") == 0 and y:
             return False
     if g("runup") is not None and d["runUp"] < g("runup"):
         return False
@@ -629,11 +741,15 @@ def base_metrics(st, i, kshares):
     if a <= 0:            # 跟網站一樣：沒有振幅就不算（漲跌停鎖死）
         return None
     prev = st["c"][i - 1] if i >= 1 else None
+    o = st["o"][i] if st.get("o") else None
     lot = st["lot"][i] or 0.0
     wan = st["wan"][i]
     return {
-        "ampPct": a / c * 100 if c > 0 else 0,
+        # 振幅以「昨收」為分母（券商軟體的算法）；沒有昨收才退回今收
+        "ampPct": (a / prev * 100) if (prev and prev > 0) else (a / c * 100 if c > 0 else 0),
         "pos": (c - l) / a,
+        # 上影線佔當日振幅的比例：長上影 = 盤中拉高被賣回
+        "ush": ((h - max(o, c)) / a) if o is not None else None,
         "chgPct": ((c / prev - 1) * 100) if (prev and prev > 0) else None,
         "lot": lot,
         "valE": (wan / 10000) if wan is not None else None,
@@ -668,6 +784,8 @@ def run(limit_days=None, verbose=True, exits=None):
         # 條件出場最遠要看到「出場判定日的隔天開盤」，所以比 maxd 多一天
         max_h = max(max_h, maxd + 1)
     eval_days = all_days[WARMUP:len(all_days) - max_h]
+    # 市場的下一個交易日（T+1 用市場日曆，不用個股價量的下一列——個股停牌時下一列可能跨好幾天）
+    next_day = {d: all_days[j + 1] for j, d in enumerate(all_days[:-1])}
     if limit_days:
         eval_days = eval_days[-limit_days:]
 
@@ -689,6 +807,8 @@ def run(limit_days=None, verbose=True, exits=None):
     pos_in = {code: {d: j for j, d in enumerate(st["dates"])}
               for code, st in stocks.items()}
 
+    last_d = {}   # code -> (i, 指標)，前一天的指標
+    revenue = load_revenue()
     for dn_i, day in enumerate(eval_days):
         # 這一天所有股票的指標
         rows = []
@@ -698,11 +818,25 @@ def run(limit_days=None, verbose=True, exits=None):
                 continue
             if i + max_h >= len(st["c"]):
                 continue
+            if st["dates"][i + 1] != next_day.get(day):   # 隔天停牌：進場日對不上市場 T+1，不算
+                continue
             mkt, name, ksh = info.get(code, ("1", code, None))
             base = base_metrics(st, i, ksh)
             if base is None:
                 continue
             d = I.compute(st["c"][:i + 1], st["lot"][:i + 1])
+            # 昨天的帶寬變化、上通斜率（給 first：判斷「今天是不是開口的第一天」）
+            pv = last_d.get(code)
+            if pv is not None and pv[0] == i - 1:
+                d["_pW"], d["_pS"] = pv[1].get("bbWChg"), pv[1].get("slopeUp")
+            last_d[code] = (i, d)
+            # 進場（隔天開盤）時已經看得到的最近一期月營收年增率
+            rl = revenue.get(code)
+            if rl:
+                nd = next_day.get(day)
+                k = bisect.bisect_right(rl, (nd, float("inf"), True)) if nd else 0
+                d["_ryoy"] = rl[k - 1][1] if k > 0 else None
+                d["_rnew"] = (rl[k - 1][2] and rl[k - 1][1] > 0) if k > 0 else None
             # 進場價用「隔天開盤」，不是訊號當天的收盤 ——
             # 這是盤後選股，名單出來的時候今天已經收了，最快也只能明天開盤才買得到。
             # 用當天收盤當進場價會憑空多賺一段開盤跳空，那是騙自己。
@@ -1130,6 +1264,189 @@ def run_rules():
     return rows, groups, res
 
 
+# ---------------------------------------------------------------- 點火／破位事件（--rally）
+#
+# 2026-10-20 加：研究_起漲與型態 4-1、4-2 的事件，搬進正式回測做樣本外驗證。
+# 定義跟 study/rally_trade.py、study/rally_down.py 一模一樣（逐行對過，容器近一年數字對得上）：
+#   點火日 i＝收盤第一次 ≥ 前 20 天最低收盤 × 1.10（昨天還 < ）；破位日＝收盤第一次 ≤ 前 20 天最高收盤 × 0.90。
+#   前 20 天平均成交金額 ≥ 5,000 萬；個股至少 80 列歷史；隔天要是市場日曆的下一個交易日、有開盤價。
+#   隔天開盤進；k 天報酬＝第 i+k 列收盤 ÷ 隔天開盤；超額＝減同日成交金額 ≥ 1 億股票的同期間平均。
+#   t 用每日平均（Newey-West，重疊 k 期）；淨＝原始報酬（空方取負）− 隔夜成本 0.386%。
+#   距年線＝點火前一天收盤 ÷ 前 240 天均線 − 1。正式版要求滿 240 天才算（不滿就不進用到距年線的分組）；
+#   --rally-approx 改成研究程式的近似（不滿 240 天就用手上全部天數），只拿來在容器對數字。
+#
+# 事先登記（2026-10-19，樣本外 2021-02～2025-08，之前完全沒被拿來挑門檻）：
+#   ① 點火日漲 ≥ 8.8% 且距年線 5.3～29%：40 天超額 > 0
+#   ② 年線下方的點火（距年線 < −2.6%，研究裡的那一組）：40 天超額 < 0
+#   ③ 全部破位，放空方向：40 天超額 > 0（只當「不要做多」濾網，不看淨）
+# 其他列只是幫忙解讀，不算登記；看結果時要算多重檢定。
+
+RALLY_H = (20, 40)
+RALLY_MID = "20260520"          # 研究程式前後半的切點
+RALLY_OOS = ("20210201", "20250831")   # 登記的樣本外驗證期
+RALLY_GROUPS = [
+    # (key, 標籤, 方向, 是否登記, 條件)
+    ("u_all", "全部點火", "多", "", lambda e: True),
+    ("u_reg1", "① 點火日漲 ≥ 8.8% 且距年線 5.3～29%", "多", "①",
+     lambda e: e["yl"] is not None and e["chg"] >= 8.8 and 5.3 <= e["yl"] < 29),
+    ("u_reg2", "② 年線下方的點火（距年線 < −2.6%）", "多", "②",
+     lambda e: e["yl"] is not None and e["yl"] < -2.6),
+    ("u_chg", "　參考：點火日漲 ≥ 8.8%", "多", "", lambda e: e["chg"] >= 8.8),
+    ("u_yl", "　參考：距年線 5.3～29%", "多", "",
+     lambda e: e["yl"] is not None and 5.3 <= e["yl"] < 29),
+    ("d_all", "③ 全部破位（放空）", "空", "③", lambda e: True),
+    # 對照（體溫計）：每天所有符合 5,000 萬流動性的股票。它的「超額」不是 0 ——
+    # 2026-10-20 在容器發現：當天成交 ≥ 1 億的股票本身就比一般流動性股票強（近一年前半 40 天約 +1.9%），
+    # 所以上面每一列的「超額」都混了這個基準偏差。要看「比同流動性」那一欄才乾淨。
+    ("ctl", "對照：同流動性全部股票（基準偏差）", "多", "", lambda e: True),
+]
+
+
+def run_rally(approx=False, verbose=True):
+    info = load_market_meta()
+    series = {}
+    cnt = defaultdict(int)
+    for fn in sorted(os.listdir(T.STOCK_DIR)):
+        if not fn.endswith(".txt"):
+            continue
+        code = fn[:-4]
+        if code not in info:
+            continue
+        rows = []
+        for d, line in sorted(T.read_stock(code).items()):
+            p = line.split(",")
+            if len(p) < 7:
+                continue
+            try:
+                rows.append((d, float(p[1]), float(p[4]), float(p[6] or 0)))
+            except ValueError:
+                continue
+        if len(rows) > 150:
+            series[code] = rows
+            for x in rows:
+                cnt[x[0]] += 1
+    days = sorted(d for d, n in cnt.items() if n > len(series) * 0.5)
+    nxt = {d: days[j + 1] for j, d in enumerate(days[:-1])}
+
+    bench = defaultdict(lambda: defaultdict(list))
+    liquid = defaultdict(lambda: defaultdict(list))   # 當天符合 5,000 萬流動性的報酬（第二把尺）
+    ev = {"U": [], "D": []}
+    for code, r in series.items():
+        cl = [x[2] for x in r]
+        n = len(r)
+        for i in range(80, n - 1):
+            d = r[i][0]
+            if r[i + 1][0] != nxt.get(d) or r[i + 1][1] <= 0:
+                continue
+            fw = {k: (r[i + k][2] / r[i + 1][1] - 1) * 100 for k in RALLY_H if i + k < n}
+            if r[i][3] >= 10000:
+                for k, x in fw.items():
+                    bench[d][k].append(x)
+            if sum(r[j][3] for j in range(i - 20, i)) / 20 < 5000:
+                continue
+            for k, x in fw.items():
+                liquid[d][k].append(x)
+            lo = min(cl[i - 20:i])
+            hi = max(cl[i - 20:i])
+            up_ = cl[i] >= lo * 1.10 and cl[i - 1] < lo * 1.10
+            dn_ = cl[i] <= hi * 0.90 and cl[i - 1] > hi * 0.90
+            if not (up_ or dn_):
+                continue
+            if i >= 240:
+                yl = (cl[i - 1] / (sum(cl[i - 240:i]) / 240) - 1) * 100
+            elif approx:
+                yl = (cl[i - 1] / (sum(cl[:i]) / i) - 1) * 100
+            else:
+                yl = None
+            e = dict(c=code, d=d, fw=fw, yl=yl,
+                     chg=(cl[i] / cl[i - 1] - 1) * 100,
+                     gap=(r[i + 1][1] / cl[i] - 1) * 100)
+            if up_:
+                ev["U"].append(e)
+            if dn_:
+                ev["D"].append(e)
+
+    ctl = []
+    for d in sorted(liquid):
+        n_ = max(len(v) for v in liquid[d].values())
+        for j in range(n_):
+            fw = {k: v[j] for k, v in liquid[d].items() if j < len(v)}
+            ctl.append(dict(c="", d=d, fw=fw, yl=None, chg=0.0, gap=0.0))
+
+    periods = [("全部", None, None), ("登記驗證期 2021-02～2025-08", RALLY_OOS[0], RALLY_OOS[1]),
+               ("近一年 2025-09 起", "20250901", None),
+               ("研究前半（～2026-05-19）", "20250901", "20260519"),
+               ("研究後半（2026-05-20 起）", RALLY_MID, None)]
+    years = sorted({e["d"][:4] for e in ev["U"] + ev["D"]})
+    periods += [("%s 年" % y, y + "0101", y + "1231") for y in years]
+
+    def cell(lst, k, sign):
+        by = defaultdict(list)
+        by2 = defaultdict(list)
+        raw = []
+        gaps = []
+        for e in lst:
+            if k in e["fw"] and bench[e["d"]][k] and liquid[e["d"]][k]:
+                b = bench[e["d"]][k]
+                q = liquid[e["d"]][k]
+                by[e["d"]].append(sign * (e["fw"][k] - sum(b) / len(b)))
+                by2[e["d"]].append(sign * (e["fw"][k] - sum(q) / len(q)))
+                raw.append(sign * e["fw"][k])
+                gaps.append(e["gap"])
+        if len(raw) < 20:
+            return dict(n=len(raw), days=len(by))
+        dm = [sum(v) / len(v) for _, v in sorted(by.items())]
+        dm2 = [sum(v) / len(v) for _, v in sorted(by2.items())]
+        return dict(n=len(raw), days=len(dm), excess=sum(dm) / len(dm), t=nw_t(dm, k),
+                    vs_liq=sum(dm2) / len(dm2), t_liq=nw_t(dm2, k),
+                    raw=sum(raw) / len(raw), net=sum(raw) / len(raw) - COST_OVERNIGHT,
+                    win=sum(1 for x in raw if x > COST_OVERNIGHT) / len(raw) * 100,
+                    gap=sum(gaps) / len(gaps))
+
+    out = []
+    for key, lab, side, reg, fn in RALLY_GROUPS:
+        src = ctl if key == "ctl" else (ev["U"] if side == "多" else ev["D"])
+        sign = -1 if side == "空" else 1
+        g = [e for e in src if fn(e)]
+        row = dict(key=key, name=lab, side=side, reg=reg, periods=[])
+        for pl, a, b in periods:
+            gg = [e for e in g if (a is None or e["d"] >= a) and (b is None or e["d"] <= b)]
+            row["periods"].append(dict(name=pl, h={str(k): cell(gg, k, sign) for k in RALLY_H}))
+        out.append(row)
+    meta = dict(n_up=len(ev["U"]), n_dn=len(ev["D"]), approx=approx,
+                first=days[0] if days else None, last=days[-1] if days else None,
+                stocks=len(series), days=len(days))
+    if verbose:
+        print("點火／破位：股票 %d 檔、交易日 %d 天（%s ~ %s）；點火 %d 筆、破位 %d 筆%s"
+              % (len(series), len(days), meta["first"], meta["last"], meta["n_up"], meta["n_dn"],
+                 "（距年線用近似）" if approx else ""))
+    return out, meta
+
+
+def fmt_rally(rows):
+    lines = ["超額＝照方向，減同日成交金額 ≥ 1 億股票平均（登記用的尺）；比同流動性＝減同日 20 日均成交 ≥ 5,000 萬"
+             "全部股票平均（沒有基準偏差）；t＝每日平均 Newey-West；淨＝扣 0.386% 成本；"
+             "跳空＝訊號日收盤 → 隔天開盤（吃不到）"]
+    for r in rows:
+        lines.append("")
+        lines.append("■ %s（%s）%s" % (r["name"], r["side"], "　← 事先登記 " + r["reg"] if r["reg"] else ""))
+        for p in r["periods"]:
+            parts = []
+            for k in RALLY_H:
+                x = p["h"][str(k)]
+                if "excess" not in x:
+                    parts.append("%2d天 （%d 筆，太少）" % (k, x["n"]))
+                    continue
+                parts.append("%2d天 %5d筆 %4d天 超額%+6.2f%% t%s 比同流動性%+6.2f%% t%s 淨%+6.2f%%" % (
+                    k, x["n"], x["days"], x["excess"],
+                    "  —" if x["t"] is None else "%+4.1f" % x["t"], x["vs_liq"],
+                    "  —" if x["t_liq"] is None else "%+4.1f" % x["t_liq"], x["net"]))
+            x40 = p["h"]["40"]
+            gap = (" 跳空%+.2f%%" % x40["gap"]) if "gap" in x40 else ""
+            lines.append("   %-26s %s%s" % (p["name"], "｜".join(parts), gap))
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     limit = None
@@ -1162,6 +1479,14 @@ if __name__ == "__main__":
         print(fmt_table(rrows, rres))
         out["rule_rows"] = rrows
         out["rule_groups"] = groups
+
+    if "--rally" in args:
+        print("\n\n=== 點火／破位事件（研究_起漲與型態 4-1、4-2 的事先登記）===")
+        rl_rows, rl_meta = run_rally(approx="--rally-approx" in args)
+        print()
+        print(fmt_rally(rl_rows))
+        out["rally_rows"] = rl_rows
+        out["rally_meta"] = rl_meta
 
     with open(os.path.join(here, "backtest.json"), "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)
