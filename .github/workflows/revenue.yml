@@ -1,10 +1,12 @@
 name: 月營收（公開資訊觀測站）＋ 因子測試
 
-# 目前只能手動跑：先回測，有用才打開每月自動排程（使用者 10-19：沒有用就不放）。
-# 要打開排程時，在下面 on: 加回 schedule: - cron: '30 11 11 * *'（台灣時間每月 11 日 19:30）。
-# 第一次請手動跑：先選 test（約 1 分鐘，只抓 2021-01 上市、上櫃各一份），通過再選 full（約 20 分鐘）。
+# 2026-10-22 打開每月排程：R1、R3、R5 在驗證期通過（研究_免費資料因子 第 5 節），
+# 要開始累積「當時公布的版本」（11 日抓一次、更正後的舊版另存），以後才能從探索升級。
+# 台灣時間每月 11 日 19:30（避開 16:00、22:00 的台股更新）。
 # 原始檔只放 Actions 快取，不進 repo（歷史檔的授權範圍還沒確認）；只 commit 統計報告。
 on:
+  schedule:
+    - cron: '30 11 11 * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -92,6 +94,16 @@ jobs:
             git pull --rebase --autostash
             git push
           fi
+
+      # 逐筆清單（給 GPT 複核）。只放 Actions 下載區、保留 30 天，不 commit 進 repo。
+      - name: 月營收逐筆清單
+        if: always() && env.MODE == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-events
+          path: revenue_events_*.csv
+          retention-days: 30
+          if-no-files-found: warn
 
       - name: 摘要
         if: always() && env.MODE == 'full'

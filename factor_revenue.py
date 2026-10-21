@@ -189,6 +189,17 @@ def main(entry_day=11):
     out["cells"]["R5"] = dict(name="年增五分組：最高 − 最低", side=1, by_period={
         pn: {str(h): q5q1(per, h) for h in H}
         for pn, per in (("explore", EXPLORE), ("validate", VALIDATE), ("all", None))})
+    # 逐筆清單給 GPT 複核（只放 Actions 下載區，不 commit：報酬由 FinMind 股價算出，不能轉散布）
+    with open("revenue_events_%d.csv" % entry_day, "w", encoding="utf-8", newline="") as fo:
+        w = csv.writer(fo)
+        w.writerow(["entry", "ym", "code", "R1", "R2", "R3", "R4", "yoy", "q5"]
+                   + ["ret%d" % h for h in H] + ["ex%d" % h for h in H])
+        for e in events:
+            f = e["f"]
+            w.writerow([e["E"], e["ym"], e["c"]] + [int(bool(f[k])) for k in ("R1", "R2", "R3", "R4")]
+                       + ["%.6f" % f["yoy"], f.get("q", "")]
+                       + ["%.6f" % e["fw"][h] if h in e["fw"] else "" for h in H]
+                       + ["%.6f" % e["ex"][h] if h in e["ex"] else "" for h in H])
     return out
 
 

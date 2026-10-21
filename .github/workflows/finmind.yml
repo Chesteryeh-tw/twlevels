@@ -104,7 +104,7 @@ jobs:
 
       - name: 重跑回測
         if: inputs.mode == 'full'
-        # --rally：點火／破位事件的三個事先登記（研究_起漲與型態 第 5 節），結果在 backtest.json 的 rally_rows
+        # --rally：疑似起漲／疑似起跌事件的三個事先登記（研究_起漲與型態 第 5 節），結果在 backtest.json 的 rally_rows
         run: python backtest.py --rules --exits --rally
 
       - name: 產生報告
@@ -134,8 +134,8 @@ jobs:
             git push
           fi
 
-      # 點火／破位逐筆清單（給 GPT 複核）。只放 Actions 下載區、保留 30 天，不 commit 進 repo。
-      - name: 點火破位逐筆清單
+      # 疑似起漲／疑似起跌逐筆清單（給 GPT 複核）。只放 Actions 下載區、保留 30 天，不 commit 進 repo。
+      - name: 疑似起漲疑似起跌逐筆清單
         if: always() && inputs.mode == 'full'
         uses: actions/upload-artifact@v4
         with:
@@ -177,7 +177,7 @@ jobs:
                   r["name"], r["side"], s * x["excess"],
                   ("%+.1f" % (s * t)) if t is not None else "—"))
           if d.get("rally_rows"):
-              print("\n#### 點火／破位（40 天，登記驗證期 2021-02～2025-08）\n")
+              print("\n#### 疑似起漲／疑似起跌（40 天，登記驗證期 2021-02～2025-08）\n")
               print("| 分組 | 筆數 | 超額（≥1億基準）| t | 比同流動性 | t | 淨 |")
               print("|---|---|---|---|---|---|---|")
               for r in d["rally_rows"]:
