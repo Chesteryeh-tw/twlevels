@@ -1,0 +1,55 @@
+name: 快取保溫（每 5 天讀一次，避免被 GitHub 清掉）
+
+# GitHub 的 Actions 快取 7 天沒被讀過就會自動刪除。
+# 2026-10 就是這樣把 2021 起的股價歷史（約 110 MB）清掉，害 finmind.yml 要重抓 3～4 小時。
+# 這個 workflow 只「讀」三份快取：不抓新資料、不用 FinMind 額度、不改 repo，每次 1 分鐘左右。
+# 讀到就算用過，7 天的期限重新計算。
+on:
+  schedule:
+    - cron: '17 3 */5 * *'     # 每月 1、6、11、16、21、26、31 日 台北 11:17（避開 16:00、22:00 的每日更新）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 讀股價歷史快取（finmind.yml 存的）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: finmind-hist-2021-01-01-
+          restore-keys: |
+            finmind-hist-2021-01-01-
+            finmind-hist-
+
+      - name: 讀籌碼歷史快取（finmind_chips.yml 存的）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/chip_fm
+          key: finmind-chips-2021-01-01-
+          restore-keys: |
+            finmind-chips-2021-01-01-
+            finmind-chips-
+
+      - name: 讀月營收快取（revenue.yml 存的）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+
+      - name: 摘要
+        run: |
+          echo "### 快取保溫" >> $GITHUB_STEP_SUMMARY
+          for d in data/stock data/chip_fm data/revenue_raw; do
+            if [ -d "$d" ]; then
+              echo "- $d：$(du -sh $d | cut -f1)，$(find $d -type f | wc -l) 個檔" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- $d：**沒有快取**（要重跑對應的 workflow 補回來）" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
