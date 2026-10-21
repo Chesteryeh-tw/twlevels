@@ -1281,27 +1281,76 @@ def run_rules():
 #   ③ 全部破位，放空方向：40 天超額 > 0（只當「不要做多」濾網，不看淨）
 # 其他列只是幫忙解讀，不算登記；看結果時要算多重檢定。
 
-RALLY_H = (20, 40)
+#
+# 2026-10-20 再加（使用者同意，研究在 study/chips_sr.py，近一年探索）：
+#   ④ 外資、投信同一天都買超（各 ≥ 當天成交量 1%）：20 天超額 > 0
+#   ⑤ 非多頭（不是「站上月線且月線上升」）時，今天最高碰到三線壓力、收盤沒站上：5 天超額 < 0
+#   ⑥ 非多頭時，今天收盤突破三線壓力：20 天超額 < 0
+#   三線壓力＝昨收 + 0.75 ×（昨高 − 昨低）。④ 要籌碼歷史（finmind_chips 併入的 2021 起）。
+#   ⑦ 長時間支撐守住：5 天超額 > 0；⑧ 長時間壓力突破：20 天超額 > 0（使用者的說法，study/sr_long.py，近一年看起來都沒效，照原方向登記）
+#      轉折低（高）點＝最低（高）價是前後各 5 天裡最低（高）的，只用今天以前已確認的（要再等 5 天）；
+#      支撐（壓力）區＝過去 120 個交易日內至少 2 個轉折點落在彼此 ±2% 內，價位＝平均；取離昨收最近、在下方（上方）2% 以外的那一區。
+#      回測支撐：今天最低進到支撐 +2% 以內 → 守住＝收盤 ≥ 支撐 −2%；挑戰壓力：今天最高到壓力 −2% 以內 → 突破＝收盤 > 壓力 +2%。
+#      同一檔同一區 10 天內只算第一次；個股要有 130 列以上。
+# 2026-10-20（GPT 複核）：抱 k 天＝數市場日曆的第 k 個交易日，不是個股第 k 列；門檻比較前四捨五入到 6 位。
+
+RALLY_H = (5, 20, 40)
 RALLY_MID = "20260520"          # 研究程式前後半的切點
 RALLY_OOS = ("20210201", "20250831")   # 登記的樣本外驗證期
 RALLY_GROUPS = [
-    # (key, 標籤, 方向, 是否登記, 條件)
-    ("u_all", "全部點火", "多", "", lambda e: True),
-    ("u_reg1", "① 點火日漲 ≥ 8.8% 且距年線 5.3～29%", "多", "①",
+    # (key, 標籤, 方向, 是否登記, 事件來源, 條件)；來源 U＝點火、D＝破位、F＝每天的股票日（④⑤⑥ 用）
+    ("u_all", "全部點火", "多", "", "U", lambda e: True),
+    ("u_reg1", "① 點火日漲 ≥ 8.8% 且距年線 5.3～29%", "多", "①", "U",
      lambda e: e["yl"] is not None and e["chg"] >= 8.8 and 5.3 <= e["yl"] < 29),
-    ("u_reg2", "② 年線下方的點火（距年線 < −2.6%）", "多", "②",
+    ("u_reg2", "② 年線下方的點火（距年線 < −2.6%）", "多", "②", "U",
      lambda e: e["yl"] is not None and e["yl"] < -2.6),
-    ("u_yl0", "　參考：距年線 < 0（登記 ② 用的是 < −2.6%，這列不算登記）", "多", "",
+    ("u_yl0", "　參考：距年線 < 0（登記 ② 用的是 < −2.6%，這列不算登記）", "多", "", "U",
      lambda e: e["yl"] is not None and e["yl"] < 0),
-    ("u_chg", "　參考：點火日漲 ≥ 8.8%", "多", "", lambda e: e["chg"] >= 8.8),
-    ("u_yl", "　參考：距年線 5.3～29%", "多", "",
+    ("u_chg", "　參考：點火日漲 ≥ 8.8%", "多", "", "U", lambda e: e["chg"] >= 8.8),
+    ("u_yl", "　參考：距年線 5.3～29%", "多", "", "U",
      lambda e: e["yl"] is not None and 5.3 <= e["yl"] < 29),
-    ("d_all", "③ 全部破位（放空）", "空", "③", lambda e: True),
-    # 對照（體溫計）：每天所有符合 5,000 萬流動性的股票。它的「超額」不是 0 ——
+    ("d_all", "③ 全部破位（放空）", "空", "③", "D", lambda e: True),
+    ("f_both", "④ 外資投信同買（各 ≥ 量 1%）", "多", "④", "F", lambda e: e["both"]),
+    ("f_both_up", "　參考：外資投信同買·多頭", "多", "", "F", lambda e: e["both"] and e["up"]),
+    ("f_rfail_dn", "⑤ 非多頭·碰壓力沒過（預期 5 天 < 0）", "多", "⑤", "F", lambda e: e["rfail"] and not e["up"]),
+    ("f_rbrk_dn", "⑥ 非多頭·突破壓力（預期 20 天 < 0）", "多", "⑥", "F", lambda e: e["rbrk"] and not e["up"]),
+    ("f_rfail_up", "　參考：多頭·碰壓力沒過", "多", "", "F", lambda e: e["rfail"] and e["up"]),
+    ("f_rbrk_up", "　參考：多頭·突破壓力", "多", "", "F", lambda e: e["rbrk"] and e["up"]),
+    ("s_hold", "⑦ 長時間支撐守住（預期 5 天 > 0）", "多", "⑦", "S", lambda e: e["kind"] == "支撐守住"),
+    ("s_brk", "⑧ 長時間壓力突破（預期 20 天 > 0）", "多", "⑧", "S", lambda e: e["kind"] == "壓力突破"),
+    ("s_fail", "　參考：長時間支撐跌破", "多", "", "S", lambda e: e["kind"] == "支撐跌破"),
+    ("s_block", "　參考：長時間壓力被擋", "多", "", "S", lambda e: e["kind"] == "壓力被擋"),
+    # 對照（體溫計）：每天所有符合 5,000 萬流動性的股票（每天一筆＝當天平均）。它的「超額」不是 0 ——
     # 2026-10-20 在容器發現：當天成交 ≥ 1 億的股票本身就比一般流動性股票強（近一年前半 40 天約 +1.9%），
     # 所以上面每一列的「超額」都混了這個基準偏差。要看「比同流動性」那一欄才乾淨。
-    ("ctl", "對照：同流動性全部股票（基準偏差）", "多", "", lambda e: True),
+    ("ctl", "對照：同流動性全部股票（基準偏差）", "多", "", "C", lambda e: True),
 ]
+
+
+def _read_chip_flows():
+    """data/chip/<日期>.txt → {日期: {代號: (外資, 投信)}}（張）。finmind 的 job 裡會先併入 2021 起的 FinMind 籌碼。"""
+    out = {}
+    d0 = os.path.join(T.DATA, "chip")
+    if not os.path.isdir(d0):
+        return out
+    for fn in os.listdir(d0):
+        if not fn.endswith(".txt"):
+            continue
+        day = {}
+        with open(os.path.join(d0, fn), encoding="utf-8") as fh:
+            head = fh.readline().strip().split(",")
+            try:
+                jf, ji = head.index("fgn"), head.index("inv")
+            except ValueError:
+                continue
+            for line in fh:
+                p = line.rstrip("\n").split(",")
+                try:
+                    day[p[0]] = (float(p[jf]), float(p[ji]))
+                except (ValueError, IndexError):
+                    continue
+        out[fn[:8]] = day
+    return out
 
 
 def run_rally(approx=False, verbose=True):
@@ -1320,7 +1369,8 @@ def run_rally(approx=False, verbose=True):
             if len(p) < 7:
                 continue
             try:
-                rows.append((d, float(p[1]), float(p[4]), float(p[6] or 0)))
+                rows.append((d, float(p[1]), float(p[2]), float(p[3]), float(p[4]),
+                             float(p[5] or 0), float(p[6] or 0)))
             except ValueError:
                 continue
         if len(rows) > 150:
@@ -1330,21 +1380,49 @@ def run_rally(approx=False, verbose=True):
     days = sorted(d for d, n in cnt.items() if n > len(series) * 0.5)
     nxt = {d: days[j + 1] for j, d in enumerate(days[:-1])}
     cal = {d: j for j, d in enumerate(days)}
+    flows = _read_chip_flows()
 
-    bench = defaultdict(lambda: defaultdict(list))
-    liquid = defaultdict(lambda: defaultdict(list))   # 當天符合 5,000 萬流動性的報酬（第二把尺）
-    ev = {"U": [], "D": []}
+    # 基準只存「總和、筆數」，五年全市場用 list 會吃掉太多記憶體
+    bench = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))
+    liquid = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))   # 當天符合 5,000 萬流動性（第二把尺）
+    ev = {"U": [], "D": [], "F": [], "S": []}
+
+    def _zone(prices, ref, below):
+        """至少 2 個轉折點在彼此 ±2% 內的區；回離 ref 最近、在下方（below）或上方 2% 以外的 (價位, 個數)。"""
+        best = None
+        ps = sorted(prices)
+        for p0 in ps:
+            grp = [q for q in ps if abs(q / p0 - 1) <= 0.02]
+            if len(grp) < 2:
+                continue
+            lv = sum(grp) / len(grp)
+            if (ref > lv * 1.02) if below else (ref < lv * 0.98):
+                dist = abs(ref / lv - 1)
+                if best is None or dist < best[2]:
+                    best = (lv, len(grp), dist)
+        return best
     for code, r in series.items():
-        cl = [x[2] for x in r]
+        o = [x[1] for x in r]; hi = [x[2] for x in r]; lo_ = [x[3] for x in r]
+        cl = [x[4] for x in r]; vo = [x[5] for x in r]; wan = [x[6] for x in r]
         n = len(r)
-        # 每一列在市場日曆上的位置（不在日曆上的日子給前一個日曆日，只會更保守）
         ci = [cal.get(x[0], -1) for x in r]
+        ma = [None] * n
+        s = 0.0
+        for j in range(n):
+            s += cl[j]
+            if j >= 20:
+                s -= cl[j - 20]
+            if j >= 19:
+                ma[j] = s / 20
+        # 長時間支撐壓力用的轉折點（⑦⑧）
+        plo = [j for j in range(5, n - 5) if lo_[j] == min(lo_[j - 5:j + 6])]
+        phi = [j for j in range(5, n - 5) if hi[j] == max(hi[j - 5:j + 6])]
+        last_s, last_r, zcache = {}, {}, {}
         for i in range(80, n - 1):
             d = r[i][0]
-            if r[i + 1][0] != nxt.get(d) or r[i + 1][1] <= 0 or ci[i] < 0:
+            if r[i + 1][0] != nxt.get(d) or o[i + 1] <= 0 or ci[i] < 0:
                 continue
-            # 2026-10-20（GPT 複核）：抱 k 天＝數市場日曆的第 k 個交易日，不是個股第 k 列。
-            # 那天沒成交就用之前最後一個收盤價，並記下空了幾天（stale）。冷門股常有零成交的日子。
+            # 抱 k 天＝市場日曆第 k 個交易日；那天沒成交用之前最後一個收盤價，記下空了幾天
             fw, fx = {}, {}
             for k in RALLY_H:
                 t = ci[i] + k
@@ -1357,19 +1435,56 @@ def run_rally(approx=False, verbose=True):
                     j += 1
                 if ci[j] < 0 or ci[j] > t:
                     continue
-                fw[k] = (r[j][2] / r[i + 1][1] - 1) * 100
+                fw[k] = (cl[j] / o[i + 1] - 1) * 100
                 fx[k] = (r[j][0], days[t], t - ci[j])
-            if r[i][3] >= 10000:
+            if wan[i] >= 10000:
                 for k, x in fw.items():
-                    bench[d][k].append(x)
-            if sum(r[j][3] for j in range(i - 20, i)) / 20 < 5000:
+                    b = bench[d][k]; b[0] += x; b[1] += 1
+            if sum(wan[i - 20:i]) / 20 < 5000:
                 continue
             for k, x in fw.items():
-                liquid[d][k].append(x)
+                b = liquid[d][k]; b[0] += x; b[1] += 1
+            gap = (o[i + 1] / cl[i] - 1) * 100
+            # ④⑤⑥：每個股票日都可能是事件
+            up = ma[i] is not None and ma[i - 1] is not None and cl[i] > ma[i] and ma[i] > ma[i - 1]
+            fl = flows.get(d, {}).get(code)
+            both = bool(fl and vo[i] > 0 and fl[0] >= 0.01 * vo[i] and fl[1] >= 0.01 * vo[i])
+            A = hi[i - 1] - lo_[i - 1]
+            rfail = rbrk = False
+            if A > 0:
+                R = round(cl[i - 1] + 0.75 * A, 6)
+                rfail = hi[i] >= R and cl[i] <= R
+                rbrk = hi[i] >= R and cl[i] > R
+            if i >= 130:
+                a1, b1 = bisect.bisect_left(plo, i - 120), bisect.bisect_right(plo, i - 6)
+                a2, b2 = bisect.bisect_left(phi, i - 120), bisect.bisect_right(phi, i - 6)
+                kz = (a1, b1, a2, b2, i - 1)
+                zs = _zone([lo_[j] for j in plo[a1:b1]], cl[i - 1], True)
+                zr = _zone([hi[j] for j in phi[a2:b2]], cl[i - 1], False)
+                for zz, isup in ((zs, True), (zr, False)):
+                    if not zz:
+                        continue
+                    lv = zz[0]
+                    key = round(lv, 2)
+                    last = last_s if isup else last_r
+                    if isup and lo_[i] <= lv * 1.02 and last.get(key, -99) < i - 10:
+                        kind = "支撐守住" if cl[i] >= lv * 0.98 else "支撐跌破"
+                    elif (not isup) and hi[i] >= lv * 0.98 and last.get(key, -99) < i - 10:
+                        kind = "壓力突破" if cl[i] > lv * 1.02 else "壓力被擋"
+                    else:
+                        continue
+                    last[key] = i
+                    ev["S"].append(dict(c=code, d=d, fw=fw, fx=fx, entry=r[i + 1][0], yl=None, ma240_n=None,
+                                        chg=round((cl[i] / cl[i - 1] - 1) * 100, 6), gap=gap, kind=kind,
+                                        level=round(lv, 4), touches=zz[1]))
+            if both or rfail or rbrk:
+                ev["F"].append(dict(c=code, d=d, fw=fw, fx=fx, entry=r[i + 1][0], yl=None, ma240_n=None,
+                                    chg=round((cl[i] / cl[i - 1] - 1) * 100, 6), gap=gap,
+                                    both=both, up=up, rfail=rfail, rbrk=rbrk))
             lo = min(cl[i - 20:i])
-            hi = max(cl[i - 20:i])
+            hh = max(cl[i - 20:i])
             up_ = cl[i] >= lo * 1.10 and cl[i - 1] < lo * 1.10
-            dn_ = cl[i] <= hi * 0.90 and cl[i - 1] > hi * 0.90
+            dn_ = cl[i] <= hh * 0.90 and cl[i - 1] > hh * 0.90
             if not (up_ or dn_):
                 continue
             if i >= 240:
@@ -1382,25 +1497,22 @@ def run_rally(approx=False, verbose=True):
             e = dict(c=code, d=d, fw=fw, fx=fx, entry=r[i + 1][0],
                      yl=None if yl is None else round(yl, 6),
                      ma240_n=240 if i >= 240 else i,
-                     chg=round((cl[i] / cl[i - 1] - 1) * 100, 6),
-                     gap=(r[i + 1][1] / cl[i] - 1) * 100)
+                     chg=round((cl[i] / cl[i - 1] - 1) * 100, 6), gap=gap)
             if up_:
                 ev["U"].append(e)
             if dn_:
                 ev["D"].append(e)
 
-    ctl = []
-    for d in sorted(liquid):
-        n_ = max(len(v) for v in liquid[d].values())
-        for j in range(n_):
-            fw = {k: v[j] for k, v in liquid[d].items() if j < len(v)}
-            ctl.append(dict(c="", d=d, fw=fw, yl=None, chg=0.0, gap=0.0))
+    mean = lambda b: b[0] / b[1] if b[1] else None
+    ctl = [dict(c="", d=d, fw={k: mean(b) for k, b in kk.items() if b[1]}, yl=None, chg=0.0, gap=0.0)
+           for d, kk in sorted(liquid.items())]
+    ev["C"] = ctl
 
     periods = [("全部", None, None), ("登記驗證期 2021-02～2025-08", RALLY_OOS[0], RALLY_OOS[1]),
                ("近一年 2025-09 起", "20250901", None),
                ("研究前半（～2026-05-19）", "20250901", "20260519"),
                ("研究後半（2026-05-20 起）", RALLY_MID, None)]
-    years = sorted({e["d"][:4] for e in ev["U"] + ev["D"]})
+    years = sorted({e["d"][:4] for e in ev["U"] + ev["D"] + ev["F"] + ev["S"]})
     periods += [("%s 年" % y, y + "0101", y + "1231") for y in years]
 
     def cell(lst, k, sign):
@@ -1409,13 +1521,15 @@ def run_rally(approx=False, verbose=True):
         raw = []
         gaps = []
         for e in lst:
-            if k in e["fw"] and bench[e["d"]][k] and liquid[e["d"]][k]:
-                b = bench[e["d"]][k]
-                q = liquid[e["d"]][k]
-                by[e["d"]].append(sign * (e["fw"][k] - sum(b) / len(b)))
-                by2[e["d"]].append(sign * (e["fw"][k] - sum(q) / len(q)))
-                raw.append(sign * e["fw"][k])
-                gaps.append(e["gap"])
+            if k not in e["fw"]:
+                continue
+            b, q = mean(bench[e["d"]][k]), mean(liquid[e["d"]][k])
+            if b is None or q is None:
+                continue
+            by[e["d"]].append(sign * (e["fw"][k] - b))
+            by2[e["d"]].append(sign * (e["fw"][k] - q))
+            raw.append(sign * e["fw"][k])
+            gaps.append(e["gap"])
         if len(raw) < 20:
             return dict(n=len(raw), days=len(by))
         dm = [sum(v) / len(v) for _, v in sorted(by.items())]
@@ -1427,50 +1541,52 @@ def run_rally(approx=False, verbose=True):
                     gap=sum(gaps) / len(gaps))
 
     out = []
-    for key, lab, side, reg, fn in RALLY_GROUPS:
-        src = ctl if key == "ctl" else (ev["U"] if side == "多" else ev["D"])
+    for key, lab, side, reg, src, fn in RALLY_GROUPS:
         sign = -1 if side == "空" else 1
-        g = [e for e in src if fn(e)]
+        g = [e for e in ev[src] if fn(e)]
         row = dict(key=key, name=lab, side=side, reg=reg, periods=[])
         for pl, a, b in periods:
             gg = [e for e in g if (a is None or e["d"] >= a) and (b is None or e["d"] <= b)]
             row["periods"].append(dict(name=pl, h={str(k): cell(gg, k, sign) for k in RALLY_H}))
         out.append(row)
+
     # 逐筆清單（給 GPT 複核；只放 Actions 下載區，不 commit —— 價格來自 FinMind，不轉散布原始資料）
     try:
         import csv as _csv
         with open("rally_events.csv", "w", newline="", encoding="utf-8-sig") as fh:
             w = _csv.writer(fh)
-            grp = [g for g in RALLY_GROUPS if g[0] != "ctl"]
-            w.writerow(["方向", "代號", "訊號日", "進場日", "當天漲跌%", "距年線%", "年線天數", "隔天跳空%"]
+            grp = [g for g in RALLY_GROUPS if g[4] != "C"]
+            w.writerow(["來源", "代號", "訊號日", "進場日", "當天漲跌%", "距年線%", "年線天數", "隔天跳空%"]
                        + sum([["%d天出場日" % k, "%d天目標日" % k, "%d天空了幾天" % k, "%d天報酬%%" % k,
                                "%d天基準1億%%" % k, "%d天同流動性%%" % k] for k in RALLY_H], [])
                        + [g[0] for g in grp])
-            for side in ("U", "D"):
-                for e in sorted(ev[side], key=lambda x: (x["d"], x["c"])):
-                    row = ["多" if side == "U" else "空", e["c"], e["d"], e["entry"], "%.6f" % e["chg"],
-                           "" if e["yl"] is None else "%.6f" % e["yl"], e["ma240_n"], "%.4f" % e["gap"]]
+            for src in ("U", "D", "F", "S"):
+                for e in sorted(ev[src], key=lambda x: (x["d"], x["c"])):
+                    row = [{"U": "點火", "D": "破位", "F": "股票日", "S": e.get("kind", "")}[src], e["c"], e["d"], e["entry"], "%.6f" % e["chg"],
+                           "" if e["yl"] is None else "%.6f" % e["yl"],
+                           "" if e["ma240_n"] is None else e["ma240_n"], "%.4f" % e["gap"]]
                     for k in RALLY_H:
                         if k in e["fw"]:
-                            b1, q1 = bench[e["d"]][k], liquid[e["d"]][k]
+                            b1, q1 = mean(bench[e["d"]][k]), mean(liquid[e["d"]][k])
                             row += [e["fx"][k][0], e["fx"][k][1], e["fx"][k][2], "%.4f" % e["fw"][k],
-                                    "%.4f" % (sum(b1) / len(b1)) if b1 else "", "%.4f" % (sum(q1) / len(q1)) if q1 else ""]
+                                    "" if b1 is None else "%.4f" % b1, "" if q1 is None else "%.4f" % q1]
                         else:
                             row += [""] * 6
-                    row += [int((g[2] == ("多" if side == "U" else "空")) and bool(g[4](e))) for g in grp]
+                    row += [int(g[4] == src and bool(g[5](e))) for g in grp]
                     w.writerow(row)
     except OSError as ex:
         print("逐筆清單寫不出來：%s" % ex)
     stale = [e["fx"][40][2] for s_ in ("U", "D") for e in ev[s_] if 40 in e.get("fx", {})]
-    meta = dict(n_up=len(ev["U"]), n_dn=len(ev["D"]), approx=approx,
+    meta = dict(n_up=len(ev["U"]), n_dn=len(ev["D"]), n_f=len(ev["F"]), n_s=len(ev["S"]), approx=approx,
                 stale40=sum(1 for x in stale if x > 0), n40=len(stale),
+                chip_days=len(flows),
                 first=days[0] if days else None, last=days[-1] if days else None,
                 stocks=len(series), days=len(days))
     if verbose:
-        print("點火／破位：股票 %d 檔、交易日 %d 天（%s ~ %s）；點火 %d 筆、破位 %d 筆%s"
-              % (len(series), len(days), meta["first"], meta["last"], meta["n_up"], meta["n_dn"],
-                 "（距年線用近似）" if approx else ""))
-        print("有 40 天結果 %d 筆，其中出場日當天沒成交、用之前收盤價的 %d 筆" % (meta["n40"], meta["stale40"]))
+        print("點火／破位：股票 %d 檔、交易日 %d 天（%s ~ %s）；點火 %d 筆、破位 %d 筆、④⑤⑥ 股票日 %d 筆、⑦⑧ 支撐壓力 %d 筆；籌碼 %d 天%s"
+              % (len(series), len(days), meta["first"], meta["last"], meta["n_up"], meta["n_dn"], meta["n_f"], meta["n_s"],
+                 meta["chip_days"], "（距年線用近似）" if approx else ""))
+        print("點火／破位有 40 天結果 %d 筆，其中出場日當天沒成交、用之前收盤價的 %d 筆" % (meta["n40"], meta["stale40"]))
     return out, meta
 
 
@@ -1488,8 +1604,8 @@ def fmt_rally(rows):
                 if "excess" not in x:
                     parts.append("%2d天 （%d 筆，太少）" % (k, x["n"]))
                     continue
-                parts.append("%2d天 %5d筆 %4d天 超額%+6.2f%% t%s 比同流動性%+6.2f%% t%s 淨%+6.2f%%" % (
-                    k, x["n"], x["days"], x["excess"],
+                parts.append("%2d天 %5d筆 超額%+6.2f%% t%s 比同流動性%+6.2f%% t%s 淨%+6.2f%%" % (
+                    k, x["n"], x["excess"],
                     "  —" if x["t"] is None else "%+4.1f" % x["t"], x["vs_liq"],
                     "  —" if x["t_liq"] is None else "%+4.1f" % x["t_liq"], x["net"]))
             x40 = p["h"]["40"]
