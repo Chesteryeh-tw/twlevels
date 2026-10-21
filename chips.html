@@ -84,6 +84,10 @@ a{color:var(--accent)}
 .info b{font-weight:600}
 .chartbox{position:relative;height:calc(100vh - 150px);min-height:520px}
 #chart{position:absolute;inset:0}
+.grip{height:14px;cursor:ns-resize;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:11px;color:var(--muted);border-top:1px solid var(--line2);user-select:none;touch-action:none}
+.grip:hover{color:var(--accent)}
+.grip::before{content:"";width:36px;height:3px;border-radius:2px;background:currentColor;opacity:.6}
 .band{position:absolute;top:0;bottom:0;background:var(--band);pointer-events:none;z-index:2;display:none;
   border-left:1px dashed var(--accent);border-right:1px dashed var(--accent)}
 .legends{position:absolute;inset:0;pointer-events:none;z-index:3}
@@ -165,6 +169,7 @@ table.bk tr.on td{background:var(--accent-soft)}
       <div class="band" id="band"></div>
       <div class="legends" id="legends"></div>
     </div>
+    <div class="grip" id="grip" title="上下拖曳調整圖表高度；點兩下恢復自動">拖曳調整高度</div>
     <div class="foot">點圖上任一天：右側顯示那一天的分點明細，色帶是統計區間。紅＝買超／上漲，綠＝賣超／下跌。分點資料只在榜單內觀察到，沒上榜的日子是空白，不是 0。<br>圖表元件：<a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts™</div>
   </section>
 
@@ -235,8 +240,9 @@ var S = {
 try{ var saved=JSON.parse(localStorage.getItem('twlvChipsUI')||'{}');
   if(saved.panes) for(var k in saved.panes) if(k in S.panes) S.panes[k]=!!saved.panes[k];
   if(saved.months!=null) S.months=saved.months;
+  if(saved.chartH) S.chartH=+saved.chartH;
 }catch(e){}
-function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({panes:S.panes,months:S.months})); }catch(e){} }
+function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({panes:S.panes,months:S.months,chartH:S.chartH||0})); }catch(e){} }
 
 var PANES = [
   ['vol','成交量＋均量線'],['main','主力買賣超'],['fgn','外資'],['inv','投信'],['dlr','自營商'],['isum','三大法人合計'],
@@ -423,6 +429,35 @@ function themeOpts(){
     crosshair:{ mode:LC.CrosshairMode.Normal }
   };
 }
+// 圖表總高度：副圖越多越高（頁面往下捲）；也可以拖下方把手自己調，記在瀏覽器（點兩下恢復自動）
+function autoHeight(){
+  var n=chart?chart.panes().length:1, small=window.innerWidth<=860;
+  var base=small?Math.round(window.innerHeight*0.72):window.innerHeight-150;
+  var need=(small?260:340)+(small?95:115)*Math.max(0,n-1);
+  return Math.max(small?460:520, base, need);
+}
+function fitHeight(){
+  var box=document.querySelector('.chartbox'); if(!box) return;
+  box.style.height=(S.chartH>0?S.chartH:autoHeight())+'px';
+  relayout();
+}
+// 圖表改高度後，等它自己排好（autoSize 是非同步的）再放副圖標籤與色帶
+function relayout(){
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ if(chart){ drawBand(); placeLegends(); } }); });
+  setTimeout(function(){ if(chart){ drawBand(); placeLegends(); } }, 120);
+}
+(function(){
+  var g=$('grip'); if(!g) return;
+  var y0=0,h0=0,drag=false;
+  g.addEventListener('pointerdown',function(e){ drag=true; y0=e.clientY; h0=document.querySelector('.chartbox').getBoundingClientRect().height;
+    try{ g.setPointerCapture(e.pointerId); }catch(_){} e.preventDefault(); });
+  g.addEventListener('pointermove',function(e){ if(!drag) return;
+    S.chartH=Math.max(300,Math.min(4000,Math.round(h0+e.clientY-y0))); fitHeight(); });
+  function end(){ if(!drag) return; drag=false; saveUI(); }
+  g.addEventListener('pointerup',end); g.addEventListener('pointercancel',end);
+  g.addEventListener('dblclick',function(){ S.chartH=0; fitHeight(); saveUI(); });
+  window.addEventListener('resize',function(){ if(!(S.chartH>0)) fitHeight(); });
+})();
 function buildChart(){
   if(chart){ chart.remove(); chart=null; }
   ser={}; paneIdx={};
@@ -480,11 +515,12 @@ function buildChart(){
     chart.panes()[p6].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
   // 高度：主圖大、副圖小
   var ps=chart.panes(); ps[0].setStretchFactor(3.2); for(var i=1;i<ps.length;i++) ps[i].setStretchFactor(1);
+  fitHeight();
 
   chart.subscribeCrosshairMove(onMove);
   chart.subscribeClick(function(p){ if(p&&p.time){ S.sel=String(p.time).replace(/-/g,''); renderSide(); drawBand(); updateLegend(S.hover); } });
   chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ drawBand(); placeLegends(); });
-  new ResizeObserver(function(){ drawBand(); placeLegends(); }).observe(el);
+  new ResizeObserver(function(){ relayout(); }).observe(el);
   fillData();
   applyRange();
 }
