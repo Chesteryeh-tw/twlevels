@@ -1,8 +1,8 @@
 {
  "version": "limitup_list v1（2026-10-10）",
- "generated_at": "2026-10-22T02:23:22+08:00",
+ "generated_at": "2026-10-22T21:22:43+08:00",
  "source": "官方收盤行情（data/stock/<代號>.txt：證交所 MI_INDEX／櫃買上櫃行情，歷史由 FinMind 補齊），未還原除權息",
- "price_data_last_date": "20261021",
+ "price_data_last_date": "20261022",
  "start": "20260911",
  "definition": {
   "漲停": "收盤 = 漲停價（昨收 × 1.1，依升降單位無條件捨去）而且收盤 = 最高",
@@ -18,12 +18,10 @@
  },
  "fetch_rule": "limitup_fetch.csv：事件當天＋隔一個交易日；下一個交易日還沒到的不列入，下一次重建時自動補上",
  "waiting_next_day": [
-  "2466",
-  "4526",
-  "4577",
-  "4720",
-  "4770",
-  "5228"
+  "2465",
+  "3691",
+  "6148",
+  "7730"
  ],
  "available_at": "GitHub Actions 每交易日台北 16:00 排程後產生；以 commit 時間為實際可用時間"
 }

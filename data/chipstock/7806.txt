@@ -1,5 +1,6 @@
 # chip date,fgn,inv,dlrSelf,dlrHedge,mgn,shrt
 20261016,-4,0,0,0,,
+20261022,0,0,-1.105,0,,
 # tdcc date,big,small,holders
 20260918,58.33,9.38,347
 20260924,58.33,9.45,351
