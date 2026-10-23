@@ -67,14 +67,14 @@ def get(url):
             if e.code in STOP_HTTP:
                 raise Stop("HTTP %d：%s" % (e.code, url))
             data, status = e.read() or b"", e.code
+        head = data[:500].lower()      # 每次回應（含錯誤頁）先檢查：是網頁就立刻停，不重試
+        if b"<html" in head or b"<!doctype" in head or b"captcha" in head:
+            raise Stop("回應是網頁（可能被擋，HTTP %s）：%s" % (status, url))
         if status < 500 or wait is None:
             break
         print("    HTTP %d，%d 秒後重試：%s" % (status, wait, url))
         time.sleep(wait)
     got = utc_now()
-    head = data[:500].lower()
-    if b"<html" in head or b"<!doctype" in head or b"captcha" in head:
-        raise Stop("回應是網頁（可能被擋）：%s" % url)
     return data, status, started, got
 
 
@@ -204,13 +204,45 @@ def write(snaps, daily, cal):
     keys = ["case_id", "code", "signal_date", "markets_with_data", "signal_found", "next_trade_row_date",
             "next_market_day", "next_open", "low20", "cross_today", "below_yesterday", "rows_before", "yl_pct",
             "window_first_date", "bull", "A", "R", "high_today", "close_today", "touched", "not_above"]
-    # 缺漏檢查：每檔在有資料的區間內，跟證交所開市日比，缺幾天（缺月會讓 240 列年線算錯）
-    for rec in out:
-        ds = sorted({r[2] for r in by.get(rec["code"], [])})
-        miss = [d for d in sorted(cal) if ds and ds[0] <= d <= ds[-1] and d not in set(ds)]
-        rec["missing_market_days"] = len(miss)
+    # 必要窗口檢查（依證交所開市日，不靠「至少 240 列」）：② 要訊號前 240 個開市日＋訊號日＋次日；⑤ 要前 21 天＋訊號日＋次日。
+    # 任何一天沒有日線（抓取失敗、停牌都算）→ coverage_status=incomplete、eligibility=unresolved，不輸出看似合格的特徵。
+    cal_s = sorted(cal)
+    fail_months = {}
+    for sn in snaps:
+        if str(sn[4]) != "200":
+            mk, cd, ym = sn[0][:-5].split("_")
+            fail_months.setdefault(cd, []).append("%s:%s:HTTP%s" % (mk, ym, sn[4]))
+    for rec, case in zip(out, CASES):
+        flag, code, sig = case[1], case[2], case[3]
+        need = 240 if flag == "u_reg2" else 21
+        before = [d for d in cal_s if d < sig]
+        after = [d for d in cal_s if d > sig]
+        exp = before[-need:] + [sig] + after[:1]
+        have = {r[2] for r in by.get(code, []) if r[6] is not None and (r[7] or 0) > 0}
+        miss = [d for d in exp if d not in have]
+        rec["expected_window_start"] = exp[0] if len(before) >= need else ""
+        rec["expected_dates"] = len(exp)
+        rec["observed_window_start"] = min((d for d in exp if d in have), default="")
+        rec["missing_dates"] = len(miss) if len(before) >= need else "calendar_too_short"
         rec["missing_months"] = " ".join(sorted({d[:6] for d in miss}))
-    keys += ["missing_market_days", "missing_months"]
+        rec["failed_requests"] = " ".join(fail_months.get(code, []))
+        complete = len(before) >= need and not miss
+        rec["coverage_status"] = "complete" if complete else "incomplete"
+        if not complete:
+            for k in ("yl_pct", "window_first_date", "R", "touched", "not_above", "bull", "cross_today", "below_yesterday"):
+                if k in rec:
+                    rec["observed_" + k] = rec.pop(k)       # 保留觀測值供除錯，但不當成可驗收的特徵
+            rec["eligibility"] = "unresolved"
+        elif flag == "u_reg2":
+            ok = rec.get("cross_today") and rec.get("below_yesterday") and rec.get("yl_pct") != "" and rec["yl_pct"] < -2.6
+            rec["eligibility"] = "pass" if ok else "fail"
+        else:
+            ok = rec.get("bull") is False and rec.get("A") and rec.get("touched") and rec.get("not_above")
+            rec["eligibility"] = "pass" if ok else "fail"
+        rec["compare_to_original_value"] = "待 GPT 用 rally_events.csv 比對"
+    keys += ["expected_window_start", "observed_window_start", "expected_dates", "missing_dates", "missing_months",
+             "failed_requests", "coverage_status", "eligibility", "compare_to_original_value"]
+    keys += sorted({k for r in out for k in r if k.startswith("observed_") and k not in keys})
     w("feature_check.csv", keys, [[r.get(k, "") for k in keys] for r in out])
     for rec in out:       # 寫成 Actions 註記，不用下載檔也看得到
         print("::notice title=%s::%s" % (rec["case_id"], " ".join("%s=%s" % (k, rec.get(k, "")) for k in keys if rec.get(k, "") != "")))

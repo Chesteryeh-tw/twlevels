@@ -14,7 +14,7 @@
   - 原始檔只放 Actions 快取，不 commit（歷史檔的授權範圍還沒確認）。
 
 用法：
-  python revenue_fetch.py --test         只抓 2021-01 上市、上櫃各一份，驗證後印出來，不寫檔
+  python revenue_fetch.py --test         只抓 2021-01 上市、上櫃各一份，驗證後印出來；不寫原始檔與 panel，只寫請求紀錄
   python revenue_fetch.py                抓 2020-01 到最新一個月；已驗過的跳過，最近 3 個月重抓
   python revenue_fetch.py --panel-only   不抓，只用已存的原始檔重建 data/revenue/panel.csv
 """
@@ -158,16 +158,20 @@ def fetch_one(mkt, y, m):
 ATTEMPTS = os.path.join(RAW, "attempts.jsonl")
 
 
+AUDIT_FAILED = []
+
+
 def log_attempt(mkt, y, m, started, result, **kw):
-    """每一次請求都追加一行（只增不改），跟 manifest 的「目前版本」分開。"""
+    """每一次請求都追加一行（只增不改），跟 manifest 的「目前版本」分開。
+    寫不進去不會中斷抓取，但會記在 AUDIT_FAILED，最後不發布 panel、回非 0。"""
     try:
         os.makedirs(RAW, exist_ok=True)
         rec = dict(key="%s_%d%02d" % (mkt, y, m), request_started_at=started, logged_at=utc_now(), result=result)
         rec.update(kw)
         with open(ATTEMPTS, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    except OSError as e:
+        AUDIT_FAILED.append("%s_%d%02d：%s" % (mkt, y, m, e))
 
 
 def load_manifest():
@@ -275,12 +279,18 @@ def check_inputs(man):
     return good, problems
 
 
-def coverage_gaps(good):
-    """從 START 到目前最新合格月份，上市、上櫃每個月都要有；缺的列出來。"""
+def requested_end(man):
+    """要求的最後月份＝帳本裡出現過的最大月份（不論成功或失敗；抓過、試過、被擋都會留鍵）。"""
+    yms = [k.split("_")[1] for k in man if "_" in k]
+    return max(yms) if yms else None
+
+
+def coverage_gaps(good, end):
+    """從 START 到「要求的最後月份」end，上市、上櫃每個月都要有；缺的列出來（包含最後月份兩市都缺）。"""
     have = {k for k, _ in good}
     if not have:
         return ["一份合格的都沒有"]
-    last = max(k.split("_")[1] for k in have)
+    last = end or max(k.split("_")[1] for k in have)
     gaps, (y, m) = [], START
     while "%d%02d" % (y, m) <= last:
         for mkt in ("sii", "otc"):
@@ -298,7 +308,10 @@ def build_panel(man):
         print("沒有來源帳本（manifest 不存在或是空的），不發布 panel%s" % ("，保留上一份" if os.path.exists(panel) else ""))
         return False
     good, problems = check_inputs(man)
-    problems += ["缺 %s" % g for g in coverage_gaps(good)]
+    end = requested_end(man)
+    problems += ["缺 %s" % g for g in coverage_gaps(good, end)]
+    if AUDIT_FAILED:
+        problems += ["請求紀錄寫不進去（證據不完整）：%s" % x for x in AUDIT_FAILED]
     if problems:
         print("有 %d 個問題，不發布新的 panel.csv（保留上一份）：" % len(problems))
         for x in problems[:50]:
@@ -319,7 +332,11 @@ def build_panel(man):
                     "raw_sha256", "captured_at", "pit_verified"])
         w.writerows([["" if x is None else x for x in r] for r in out])
     os.replace(tmp, panel)
-    print("panel.csv：%d 列（實際驗過 %d 個市場月份，無缺月）" % (len(out), len(good)))
+    observed = max(k.split("_")[1] for k, _ in good)
+    meta = dict(requested_start="%d%02d" % START, requested_end=end, observed_end=observed,
+                months_verified=len(good), rows=len(out), missing_keys=[], published_at=utc_now(), pit_verified=False)
+    save_atomic(os.path.join(OUT, "panel_meta.json"), json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+    print("panel.csv：%d 列（%d 個市場月份，%s～%s 全數驗過）" % (len(out), len(good), meta["requested_start"], end))
     return True
 
 
@@ -329,7 +346,22 @@ def record_version(man, key, mkt, ym, data, body, gen, started, got):
     old = man.get(key, {})
     hist = list(old.get("history", []))
     if old.get("ok") and old.get("sha256") == sha:
-        old.update(captured_at=got, request_started_at=started)   # 同內容重抓：只更新最近確認時間
+        # 同內容重抓：保留「我們最早看到這份內容」的時間（舊格式沒有 first_captured_at 就沿用舊 captured_at 並標記）
+        if not old.get("first_captured_at"):
+            old["first_captured_at"] = old.get("captured_at")
+            old["first_captured_from"] = "migrated_from_captured_at"
+        err = verify_file(raw_path(mkt, ym, old), sha, old.get("bytes"))
+        if err:      # 目前版本的原始檔不見或壞了：壞檔先另存成衝突證據，再用剛驗過的同內容 bytes 補回
+            p = raw_path(mkt, ym, old)
+            rep = dict(at=got, previous_file=old.get("file") or (ym + ".csv"), issue=err)
+            if os.path.exists(p):
+                bad = p + ".conflict-" + got.replace(":", "").replace("-", "")
+                os.replace(p, bad)
+                rep["moved_to"] = os.path.basename(bad)
+            old["file"] = store_immutable(mkt, ym, data, sha)
+            old.setdefault("repairs", []).append(rep)
+            print("  %s 原始檔%s，已用相同內容補回" % (key, err))
+        old.update(captured_at=got, request_started_at=started)
         man[key] = old
         save_manifest(man)
         return False
@@ -364,7 +396,7 @@ def main():
             for r in body[:3]:
                 print("   ", r[2], r[3], "當月", r[5], "去年當月", r[7], "年增%", r[9][:6])
             time.sleep(PAUSE)
-        print("測試通過（沒有寫任何檔）")
+        print("測試通過（沒有寫行情原始檔或 panel；請求紀錄會寫進 attempts.jsonl）")
         return
     try:
         man = load_manifest()
@@ -388,6 +420,7 @@ def main():
                     data, body, gen, started, got = fetch_one(mkt, y, m)
                 except Blocked as e:
                     blocked = "%s：%s" % (key, e)
+                    man.setdefault(key, {}).setdefault("ok", False)   # 留鍵：這個月也在要求範圍內
                     break
                 except Bad as e:
                     failed.append("%s：%s" % (key, e))
@@ -414,6 +447,9 @@ def main():
     if blocked:
         print("被擋，已停止：" + blocked)
         sys.exit(2)
+    if AUDIT_FAILED:
+        print("請求紀錄寫入失敗 %d 次，證據不完整" % len(AUDIT_FAILED))
+        sys.exit(5)
     if not published:
         sys.exit(4)
     if failed:

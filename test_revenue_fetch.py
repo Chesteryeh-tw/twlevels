@@ -236,6 +236,77 @@ h = man()["sii_202101"]["history"][-1]
 check("H2 舊版快取遇更正：舊檔 202101.csv 保留並進 history", h["file"] == "202101.csv" and h["status"] == "ok"
       and os.path.exists(os.path.join(rf.RAW, "sii", "202101.csv")))
 
+# N1 最後月份兩市都缺 → 不發布（舊 panel 不變）、--panel-only 也不發布
+fresh(((2021, 1),))
+run_main()
+before = open(PANEL(), "rb").read()
+rf.months_to_fetch = lambda today=None: [(2021, 1), (2021, 2)]
+def dl_tail(mkt, y, m):
+    if (y, m) == (2021, 2):
+        raise urllib.error.HTTPError(rf.URL, 404, "x", {}, None)
+    return make_csv(mkt, y, m)
+rf.download = dl_tail
+code = run_main()
+check("N1 最後月份兩市都缺 → 主流程不發布（exit 4）、panel 不變", code == 4 and open(PANEL(), "rb").read() == before, code)
+check("N1b --panel-only 也不發布（exit 4）", run_main(["--panel-only"]) == 4 and open(PANEL(), "rb").read() == before)
+
+# N1c 正常發布時寫 panel_meta.json（要求範圍、實際範圍）
+fresh(((2021, 1), (2021, 2)))
+run_main()
+meta = json.load(open(os.path.join(rf.OUT, "panel_meta.json"), encoding="utf-8"))
+check("N1c panel_meta 記 requested_end＝observed_end＝202102", meta["requested_end"] == "202102" and meta["observed_end"] == "202102", meta)
+
+# N2 舊格式同內容重抓：first_captured_at 沿用舊 captured_at 並標記
+fresh()
+os.makedirs(os.path.join(rf.RAW, "sii"), exist_ok=True)
+os.makedirs(os.path.join(rf.RAW, "otc"), exist_ok=True)
+legacy = {}
+for mkt in ("sii", "otc"):
+    data = make_csv(mkt, 2021, 1)
+    open(os.path.join(rf.RAW, mkt, "202101.csv"), "wb").write(data)
+    legacy["%s_202101" % mkt] = dict(ok=True, sha256=hashlib.sha256(data).hexdigest(), rows=rf.MIN_ROWS[mkt],
+                                     bytes=len(data), generated="115/10/22", captured_at="2026-10-21T09:41Z", pit_verified=False)
+json.dump(legacy, open(rf.MANIFEST, "w", encoding="utf-8"))
+run_main()
+r = man()["sii_202101"]
+check("N2 舊格式同內容重抓：first_captured_at 保留舊時間並標記來源", r["first_captured_at"] == "2026-10-21T09:41Z" and r.get("first_captured_from") == "migrated_from_captured_at", r)
+
+# N3 請求紀錄寫不進去 → 不發布、exit 5
+fresh()
+run_main()
+before = open(PANEL(), "rb").read()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
+old_attempts = rf.ATTEMPTS
+rf.ATTEMPTS = os.path.join(rf.RAW, "no_such_dir", "x", "attempts.jsonl")
+os.makedirs(os.path.dirname(rf.ATTEMPTS), exist_ok=True)
+os.chmod(os.path.dirname(rf.ATTEMPTS), 0o500)
+writable = os.access(os.path.dirname(rf.ATTEMPTS), os.W_OK)
+if writable:   # 以 root 跑時權限擋不住：改成指到一個目錄名稱，讓 open() 失敗
+    os.chmod(os.path.dirname(rf.ATTEMPTS), 0o700)
+    os.makedirs(rf.ATTEMPTS, exist_ok=True)
+rf.AUDIT_FAILED.clear()
+code = run_main()
+check("N3 請求紀錄寫入失敗 → exit 5、panel 不變", code == 5 and open(PANEL(), "rb").read() == before, code)
+rf.ATTEMPTS = old_attempts
+rf.AUDIT_FAILED.clear()
+
+# N5 目前原始檔不見，收到相同內容 → 補回並可發布
+fresh()
+run_main()
+os.remove(cur_path("sii_202101"))
+code = run_main()
+r = man()["sii_202101"]
+check("N5 原始檔不見、同內容重抓 → 補回、記 repairs、可以發布", code == 0 and rf.verify_file(cur_path("sii_202101"), r["sha256"]) is None and r.get("repairs"), (code, r.get("repairs")))
+# N5b 目前原始檔壞了，收到相同內容 → 壞檔另存衝突證據再補回
+fresh()
+run_main()
+p = cur_path("sii_202101")
+open(p, "wb").write(b"broken")
+code = run_main()
+r = man()["sii_202101"]
+moved = r["repairs"][-1].get("moved_to", "")
+check("N5b 原始檔壞了 → 壞檔另存 .conflict、補回、可以發布", code == 0 and moved and os.path.exists(os.path.join(rf.RAW, "sii", moved)), (code, r.get("repairs")))
+
 # 15 之後抓失敗：已合格版本保留
 fresh()
 run_main()
