@@ -56,15 +56,21 @@ def months_around(sig, before=14, after=3):
 
 
 def get(url):
-    started = utc_now()
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data, status = r.read(), r.status
-    except urllib.error.HTTPError as e:
-        if e.code in STOP_HTTP:
-            raise Stop("HTTP %d：%s" % (e.code, url))
-        data, status = e.read() or b"", e.code
+    """5xx（例如 2026-10-23 遇到的 520）是暫時錯誤：等 10／30／60 秒重試，最多 4 次；其餘照舊。"""
+    for wait in (10, 30, 60, None):
+        started = utc_now()
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data, status = r.read(), r.status
+        except urllib.error.HTTPError as e:
+            if e.code in STOP_HTTP:
+                raise Stop("HTTP %d：%s" % (e.code, url))
+            data, status = e.read() or b"", e.code
+        if status < 500 or wait is None:
+            break
+        print("    HTTP %d，%d 秒後重試：%s" % (status, wait, url))
+        time.sleep(wait)
     got = utc_now()
     head = data[:500].lower()
     if b"<html" in head or b"<!doctype" in head or b"captcha" in head:
@@ -198,7 +204,16 @@ def write(snaps, daily, cal):
     keys = ["case_id", "code", "signal_date", "markets_with_data", "signal_found", "next_trade_row_date",
             "next_market_day", "next_open", "low20", "cross_today", "below_yesterday", "rows_before", "yl_pct",
             "window_first_date", "bull", "A", "R", "high_today", "close_today", "touched", "not_above"]
+    # 缺漏檢查：每檔在有資料的區間內，跟證交所開市日比，缺幾天（缺月會讓 240 列年線算錯）
+    for rec in out:
+        ds = sorted({r[2] for r in by.get(rec["code"], [])})
+        miss = [d for d in sorted(cal) if ds and ds[0] <= d <= ds[-1] and d not in set(ds)]
+        rec["missing_market_days"] = len(miss)
+        rec["missing_months"] = " ".join(sorted({d[:6] for d in miss}))
+    keys += ["missing_market_days", "missing_months"]
     w("feature_check.csv", keys, [[r.get(k, "") for k in keys] for r in out])
+    for rec in out:       # 寫成 Actions 註記，不用下載檔也看得到
+        print("::notice title=%s::%s" % (rec["case_id"], " ".join("%s=%s" % (k, rec.get(k, "")) for k in keys if rec.get(k, "") != "")))
     print("完成：%d 份回應、%d 筆日線、%d 個開市日" % (len(snaps), len(daily), len(cal)))
 
 
