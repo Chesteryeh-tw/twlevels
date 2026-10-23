@@ -22,7 +22,7 @@
   python warrant_fetch.py                      從 START 抓到昨天（台灣時間）
   python warrant_fetch.py --derive-only        只重建 derived/
 """
-import csv, datetime as dt, gzip, hashlib, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+import csv, datetime as dt, gzip, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 START = "20241001"
 RAW = os.path.join("data", "warrant_raw")
@@ -285,97 +285,174 @@ def stock_names():
     return names
 
 
-def underlying(wname, names, cache):
-    w = norm(wname)
-    if w in cache:
-        return cache[w]
-    best = ""
-    for L in range(min(len(w), 12), 1, -1):
-        if w[:L] in names:
-            best = names[w[:L]]
-            break
-    cache[w] = best
-    return best
+ISSUERS = ["華南永昌", "麥格理", "元大", "凱基", "富邦", "群益", "統一", "永豐", "國泰", "中信", "兆豐", "第一",
+           "華南", "康和", "宏遠", "台新", "元富", "國票", "亞東", "日盛", "摩根", "法興", "港商", "玉山", "大華",
+           "德信", "福邦", "新光", "台銀", "土銀", "合庫", "彰銀", "國票", "致和", "犇亞", "高橋", "安泰"]
+NAME_RE = re.compile(r"^(?P<abbr>.+?)(?P<iss>%s)[0-9A-Z]{2,3}(購|售)" % "|".join(sorted(set(ISSUERS), key=len, reverse=True)))
+
+
+def split_name(wname):
+    """權證簡稱 → 標的簡稱（發行商前面那段）。對不上格式回 ""。"""
+    m = NAME_RE.match(norm(wname))
+    return m.group("abbr") if m else ""
+
+
+def official_code(x):
+    x = "" if x is None else str(x).strip()
+    return x if x and x.upper() != "NONE" and any(ch.isdigit() for ch in x) else ""
+
+
+class Mapper:
+    """標的對應的順序：①官方標的代號 ②從官方資料學到的「標的簡稱 → 代號」（MI_INDEX 有代號的日子、OpenAPI t187ap36_L）
+    ③簡稱等於股票名稱 ④簡稱是唯一一檔股票名稱的子序列（例：長榮太 → 長榮航太）。都不行就留空。"""
+
+    def __init__(self, names):
+        self.names = names
+        self.votes = {}
+        self.learned = None
+        self.cache = {}
+
+    def learn(self, wname, code):
+        a, c = split_name(wname), official_code(code)
+        if a and c:
+            v = self.votes.setdefault(a, {})
+            v[c] = v.get(c, 0) + 1
+
+    def freeze(self):
+        self.learned = {}
+        for a, v in self.votes.items():
+            c, k = max(v.items(), key=lambda x: x[1])
+            if k >= 0.8 * sum(v.values()):
+                self.learned[a] = c
+
+    def by_rule(self, a):
+        if a in self.names:
+            return self.names[a]
+        hits = set()
+        for n, c in self.names.items():
+            if n[:1] != a[:1] or len(n) < len(a):
+                continue
+            it = iter(n)
+            if all(ch in it for ch in a):
+                hits.add(c)
+        return hits.pop() if len(hits) == 1 else ""
+
+    def get(self, wname, official):
+        c = official_code(official)
+        if c:
+            return c, "official"
+        a = split_name(wname)
+        if not a:
+            return "", "unparsed"
+        if a in self.learned:
+            return self.learned[a], "learned"
+        if a not in self.cache:
+            self.cache[a] = self.by_rule(a)
+        return (self.cache[a], "rule") if self.cache[a] else ("", "unmapped")
+
+
+T187 = os.path.join(RAW, "t187ap36_L.json.gz")
+
+
+def fetch_t187():
+    """OpenAPI 上市權證年度發行量概況（權證代號、名稱、標的代號）。只抓一次、存快取。"""
+    if os.path.exists(T187):
+        return
+    try:
+        data, status, _, _ = get("https://openapi.twse.com.tw/v1/opendata/t187ap36_L")
+    except Stop as e:
+        notice("t187ap36_L 沒抓到：%s" % e)
+        return
+    if status == 200 and data[:1] == b"[":
+        os.makedirs(RAW, exist_ok=True)
+        with open(T187 + ".tmp", "wb") as f:
+            f.write(gzip.compress(data))
+        os.replace(T187 + ".tmp", T187)
+
+
+def load_day(man, d, tk, mk):
+    """回傳 [(權證代號, 名稱, 非自營商淨股數, 成交股數, 成交金額, 收盤, 官方標的欄)]；缺檔回 None。"""
+    t86, mi = read_raw(man, tk, d), read_raw(man, mk, d)
+    if t86 is None or mi is None:
+        return None
+    f, data = t86
+    iC, iN, iD = col(f, "證券代號"), col(f, "證券名稱"), col(f, "自營商買賣超股數")
+    iS, iH = col(f, "自營商買賣超股數(自行買賣)"), col(f, "自營商買賣超股數(避險)")
+    mf, mdata = mi
+    jC, jV, jA, jX, jU = (col(mf, "證券代號"), col(mf, "成交股數"), col(mf, "成交金額"),
+                          col(mf, "收盤價"), col(mf, "標的代號"))
+    px = {}
+    for r in mdata:
+        px[str(r[jC]).strip()] = (num(r[jV]), num(r[jA]), num(r[jX]) if jX >= 0 else None,
+                                  r[jU] if jU >= 0 and jU < len(r) else None)
+    out = []
+    for r in data:
+        dn = num(r[iD]) if iD >= 0 else ((num(r[iS]) or 0) + (num(r[iH]) or 0))
+        if dn is None:
+            continue
+        code = str(r[iC]).strip()
+        vol, amt, close, uo = px.get(code, (None, None, None, None))
+        out.append((code, str(r[iN]).strip(), -dn, vol, amt, close, uo))
+    return out
 
 
 def derive():
     man = load_manifest()
-    names = stock_names()
-    cache = {}
+    mp = Mapper(stock_names())
+    if os.path.exists(T187):
+        for r in json.loads(gzip.decompress(open(T187, "rb").read()).decode("utf-8-sig")):
+            mp.learn(r.get("名稱", ""), r.get("標的代號"))
+    days = sorted({k.split("/")[1] for k in man})
+    loaded = {}
+    for d in days:
+        for cp, tk, mk in (("C", "t86c", "mic"), ("P", "t86p", "mip")):
+            rows = load_day(man, d, tk, mk)
+            loaded[(d, cp)] = rows
+            for r in rows or []:
+                mp.learn(r[1], r[6])            # 有官方標的代號的日子拿來學簡稱
+    mp.freeze()
+    # 檢查：學到的簡稱，用規則（③④）對的結果一致嗎
+    agree = sum(1 for a, c in mp.learned.items() if mp.by_rule(a) == c)
+    rule_hit = sum(1 for a in mp.learned if mp.by_rule(a))
     out_dir = os.path.join(RAW, "derived")
     os.makedirs(out_dir, exist_ok=True)
-    days = sorted({k.split("/")[1] for k in man})
     n_days = 0
-    amt_all = amt_mapped = 0.0
+    by_method = {}
     unmapped = {}
-    chk = [0, 0]           # 官方標的代號與名稱比對都有的筆數、一致的筆數
-    diff, diff_seen, odd = [], set(), [0]
     for d in days:
-        rows = []
-        complete = True
-        for cp, tk, mk in (("C", "t86c", "mic"), ("P", "t86p", "mip")):
-            t86, mi = read_raw(man, tk, d), read_raw(man, mk, d)
-            if t86 is None or mi is None:
+        rows, complete = [], True
+        for cp in ("C", "P"):
+            got = loaded[(d, cp)]
+            if got is None:
                 complete = False
                 continue
-            f, data = t86
-            iC, iN = col(f, "證券代號"), col(f, "證券名稱")
-            iD = col(f, "自營商買賣超股數")
-            if iD < 0:
-                iS, iH = col(f, "自營商買賣超股數(自行買賣)"), col(f, "自營商買賣超股數(避險)")
-            px = {}
-            mf, mdata = mi
-            jC, jV, jA, jX = col(mf, "證券代號"), col(mf, "成交股數"), col(mf, "成交金額"), col(mf, "收盤價")
-            jU = col(mf, "標的代號")
-            for r in mdata:
-                px[str(r[jC]).strip()] = (num(r[jV]), num(r[jA]), num(r[jX]) if jX >= 0 else None,
-                                          str(r[jU]).strip() if jU >= 0 else "")
-            for r in data:
-                code, name = str(r[iC]).strip(), str(r[iN]).strip()
-                dn = num(r[iD]) if iD >= 0 else ((num(r[iS]) or 0) + (num(r[iH]) or 0))
-                if dn is None:
-                    continue
-                vol, amt, close, uo = px.get(code, (None, None, None, ""))
+            for code, name, nd, vol, amt, close, uo in got:
+                u, how = mp.get(name, uo)
                 vwap = amt / vol if vol and amt else None
-                nd = -dn
                 est = nd * vwap if vwap else None
-                un = underlying(name, names, cache)
-                u = uo or un
-                if uo and un:
-                    chk[0] += 1
-                    chk[1] += uo == un
-                    if uo != un and len(diff) < 12 and (d, uo, un) not in diff_seen:
-                        diff_seen.add((d, uo, un))
-                        diff.append("%s %s 官方=%s 名稱=%s" % (d, name, uo, un))
-                if uo and not uo.isdigit():
-                    odd[0] += 1
-                    if len(odd) < 6:
-                        odd.append("%s 官方標的欄=%r" % (name, uo))
                 if amt:
-                    amt_all += amt
-                    if u:
-                        amt_mapped += amt
-                    else:
-                        key = norm(name)[:4]
-                        unmapped[key] = unmapped.get(key, 0) + amt
-                rows.append([d, code, name, cp, u, int(nd), vol or "", amt or "", close or "",
+                    by_method[how] = by_method.get(how, 0) + amt
+                    if not u:
+                        k = split_name(name) or norm(name)[:4]
+                        unmapped[k] = unmapped.get(k, 0) + amt
+                rows.append([d, code, name, cp, u, how, int(nd), vol or "", amt or "", close or "",
                              "" if vwap is None else round(vwap, 4), "" if est is None else round(est)])
         if not rows:
             continue
         p = os.path.join(out_dir, d + ".csv")
         with open(p + ".tmp", "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["date", "warrant", "name", "cp", "underlying", "nondealer_net_sh", "vol_sh",
+            w.writerow(["date", "warrant", "name", "cp", "underlying", "map_method", "nondealer_net_sh", "vol_sh",
                         "amt_twd", "close", "vwap", "est_net_amt_twd"])
             w.writerows(rows)
         os.replace(p + ".tmp", p)
-        if complete:
-            n_days += 1
-    top = sorted(unmapped.items(), key=lambda x: -x[1])[:15]
-    notice("權證整理：完整日 %d 天；成交金額對到標的 %.1f%%；官方標的代號 vs 名稱比對 %d／%d 一致；未對應前幾名（名稱前 4 字：金額億）%s" % (
-        n_days, 100 * amt_mapped / amt_all if amt_all else 0, chk[1], chk[0],
-        ", ".join("%s:%.1f" % (k, v / 1e8) for k, v in top)))
-    notice("權證整理檢查：官方與名稱不一致的例子 %s｜官方標的欄不是數字 %d 筆，例 %s" % (diff, odd[0], odd[1:]))
+        n_days += complete
+    tot = sum(by_method.values()) or 1
+    top = sorted(unmapped.items(), key=lambda x: -x[1])[:12]
+    notice("權證整理：完整日 %d 天；標的對應（占權證成交金額）%s；學到簡稱 %d 個，規則也對得到 %d 個、其中一致 %d 個；"
+           "對不到的前幾名（簡稱：億元）%s" % (
+               n_days, ", ".join("%s %.1f%%" % (k, 100 * v / tot) for k, v in sorted(by_method.items())),
+               len(mp.learned), rule_hit, agree, ", ".join("%s:%.1f" % (k, v / 1e8) for k, v in top)))
     return n_days
 
 
@@ -461,9 +538,11 @@ def main():
         if a and a[0] == "--probe":
             probe(a[1] if len(a) > 1 else (dt.datetime.now(TW) - dt.timedelta(days=1)).strftime("%Y%m%d"))
             return 0
-        if a and a[0] == "--derive-only":       # 不連網，只用已抓的資料
+        if a and a[0] == "--derive-only":       # 不抓 T86／MI_INDEX；只在快取沒有時抓一次 OpenAPI 權證基本資料
+            fetch_t187()
             return 0 if derive() > 0 else 4
         rc = run_fetch()
+        fetch_t187()
         derive()
         return rc
     except Stop as e:
