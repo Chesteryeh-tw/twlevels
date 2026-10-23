@@ -2,10 +2,12 @@
 """上市權證的官方日資料（2026-10-24 起）。只在 GitHub Actions 跑；原始檔只放 Actions 快取，不進 repo。
 
 來源（證交所，公開、免費）：
-  三大法人 T86  https://www.twse.com.tw/fund/T86?response=json&date=YYYYMMDD&selectType=0999   （認購）
-                                                                      selectType=0999P  （認售）
+  三大法人 T86  https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=YYYYMMDD&selectType=0999 （認購）
+                                                                            selectType=0999P（認售）
+                （舊網址 /fund/T86 的 0999 回「沒有符合條件的資料」，10-24 探測；rwd 網址才有）
   每日收盤行情  https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=YYYYMMDD&type=0999 （認購）
                                                                                     type=0999P（認售）
+                最後一張表有「標的代號」，用它對標的（官方）；名稱比對只當備援與檢查
   開市日       https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=YYYYMM01
 用途：研究_權證分點 H5「認購買超排行」。非自營商淨股數＝−自營商買賣超股數（GPT 10-15 對 HiStock 67／80 張數全符）。
 
@@ -32,8 +34,8 @@ UA = "twlevels-warrant-research (GitHub Actions; daily official warrant tables)"
 TW = dt.timezone(dt.timedelta(hours=8))
 
 KINDS = {
-    "t86c": "https://www.twse.com.tw/fund/T86?response=json&date=%s&selectType=0999",
-    "t86p": "https://www.twse.com.tw/fund/T86?response=json&date=%s&selectType=0999P",
+    "t86c": "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=%s&selectType=0999",
+    "t86p": "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=%s&selectType=0999P",
     "mic": "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=%s&type=0999",
     "mip": "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=%s&type=0999P",
 }
@@ -203,7 +205,7 @@ def run_fetch():
     man = load_manifest()
     days = trading_days(today)
     todo = [(k, d) for d in days for k in KINDS
-            if man.get("%s/%s" % (k, d), {}).get("status") not in ("ok", "empty")]
+            if man.get("%s/%s" % (k, d), {}).get("status") != "ok"]      # 開市日卻是空的 → 下次再試
     print("開市日 %d 天（%s～%s），要抓 %d 份" % (len(days), days[0], days[-1], len(todo)))
     done = fail = 0
     for i, (k, d) in enumerate(todo):
@@ -305,6 +307,7 @@ def derive():
     n_days = 0
     amt_all = amt_mapped = 0.0
     unmapped = {}
+    chk = [0, 0]           # 官方標的代號與名稱比對都有的筆數、一致的筆數
     for d in days:
         rows = []
         complete = True
@@ -321,18 +324,24 @@ def derive():
             px = {}
             mf, mdata = mi
             jC, jV, jA, jX = col(mf, "證券代號"), col(mf, "成交股數"), col(mf, "成交金額"), col(mf, "收盤價")
+            jU = col(mf, "標的代號")
             for r in mdata:
-                px[str(r[jC]).strip()] = (num(r[jV]), num(r[jA]), num(r[jX]) if jX >= 0 else None)
+                px[str(r[jC]).strip()] = (num(r[jV]), num(r[jA]), num(r[jX]) if jX >= 0 else None,
+                                          str(r[jU]).strip() if jU >= 0 else "")
             for r in data:
                 code, name = str(r[iC]).strip(), str(r[iN]).strip()
                 dn = num(r[iD]) if iD >= 0 else ((num(r[iS]) or 0) + (num(r[iH]) or 0))
                 if dn is None:
                     continue
-                vol, amt, close = px.get(code, (None, None, None))
+                vol, amt, close, uo = px.get(code, (None, None, None, ""))
                 vwap = amt / vol if vol and amt else None
                 nd = -dn
                 est = nd * vwap if vwap else None
-                u = underlying(name, names, cache)
+                un = underlying(name, names, cache)
+                u = uo or un
+                if uo and un:
+                    chk[0] += 1
+                    chk[1] += uo == un
                 if amt:
                     amt_all += amt
                     if u:
@@ -354,8 +363,8 @@ def derive():
         if complete:
             n_days += 1
     top = sorted(unmapped.items(), key=lambda x: -x[1])[:15]
-    notice("權證整理：完整日 %d 天；成交金額對到標的 %.1f%%；未對應前幾名（名稱前 4 字：金額億）%s" % (
-        n_days, 100 * amt_mapped / amt_all if amt_all else 0,
+    notice("權證整理：完整日 %d 天；成交金額對到標的 %.1f%%；官方標的代號 vs 名稱比對 %d／%d 一致；未對應前幾名（名稱前 4 字：金額億）%s" % (
+        n_days, 100 * amt_mapped / amt_all if amt_all else 0, chk[1], chk[0],
         ", ".join("%s:%.1f" % (k, v / 1e8) for k, v in top)))
     return n_days
 
