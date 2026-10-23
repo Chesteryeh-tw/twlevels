@@ -1,0 +1,101 @@
+name: 權證官方日資料 ＋ H5 認購買超排行
+
+# 2026-10-24 新增（研究_權證分點 H5）。只抓證交所公開的 T86 權證類別、MI_INDEX 權證行情、FMTQIK。
+# 原始檔只放 Actions 快取，不進 repo；結果寫成 Actions 註記＋下載區（30 天）。
+# 不要跟 update.yml、finmind.yml 同時跑（都會打證交所）。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe＝抓一天看欄位（1 分鐘）；full＝從 2024-10 抓到昨天＋回測"
+        type: choice
+        options: [probe, full]
+        default: probe
+      probe_date:
+        description: "probe 用的日期 YYYYMMDD（空白＝昨天）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warrant
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      MODE: ${{ inputs.mode || 'probe' }}
+      WARRANT_BUDGET_MIN: "290"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 探測（不寫檔）
+        if: env.MODE == 'probe'
+        run: python warrant_fetch.py --probe ${{ inputs.probe_date }}
+
+      - name: 還原已抓的權證資料
+        if: env.MODE == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/warrant_raw
+          key: warrant-raw-
+          restore-keys: |
+            warrant-raw-
+
+      - name: 抓權證（已抓的跳過；時間到就停，下次接著抓）
+        id: fetch
+        if: env.MODE == 'full'
+        continue-on-error: true
+        run: python warrant_fetch.py
+
+      - name: 存進快取
+        if: always() && env.MODE == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: data/warrant_raw
+          key: warrant-raw-${{ github.run_id }}
+
+      - name: 還原股價歷史
+        if: env.MODE == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: finmind-hist-2021-01-01-
+          restore-keys: |
+            finmind-hist-2021-01-01-
+            finmind-hist-
+
+      - name: H5 回測
+        if: env.MODE == 'full'
+        run: python warrant_study.py
+
+      - name: 結果下載區
+        if: always() && env.MODE == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warrant-h5
+          path: |
+            warrant_study_report.md
+            warrant_h5_events.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 摘要
+        if: always() && env.MODE == 'full'
+        run: |
+          echo "### 權證 H5" >> $GITHUB_STEP_SUMMARY
+          [ -f warrant_study_report.md ] && cat warrant_study_report.md >> $GITHUB_STEP_SUMMARY || echo "沒有報告" >> $GITHUB_STEP_SUMMARY
+
+      - name: 抓取有問題就標紅
+        if: env.MODE == 'full' && steps.fetch.outcome == 'failure'
+        run: |
+          echo "抓取被擋或中斷，看「抓權證」那一步。已抓到的已存進快取。"
+          exit 1
