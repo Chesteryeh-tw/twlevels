@@ -82,7 +82,7 @@ d = tempfile.mkdtemp()
 os.chdir(d)
 os.makedirs("data/stock")
 with open("data/market.txt", "w", encoding="utf-8") as f:
-    f.write("TWLV1|x\ncode,name,mkt,high\n2330,台積電,1,1\n4958,臻鼎-KY,1,1\n6488,環球晶,2,1\n")
+    f.write("TWLV1|20241001|202410012100|3|code,name,mkt,high\n2330,台積電,1,1\n4958,臻鼎-KY,1,1\n6488,環球晶,2,1\n")   # 跟真檔同格式
 wf.START = "20241001"
 real_now = wf.dt.datetime
 

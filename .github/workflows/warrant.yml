@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "probe＝抓一天看欄位（1 分鐘）；full＝從 2024-10 抓到昨天＋回測"
+        description: "probe＝抓一天看欄位；full＝從 2024-10 抓到昨天＋回測；study＝不連證交所，只用已抓的資料重算"
         type: choice
-        options: [probe, probe2, full]
+        options: [probe, probe2, full, study]
         default: probe
       probe_date:
         description: "probe 用的日期 YYYYMMDD（空白＝昨天）"
@@ -46,7 +46,7 @@ jobs:
         run: python warrant_fetch.py --probe2 ${{ inputs.probe_date }}
 
       - name: 還原已抓的權證資料
-        if: env.MODE == 'full'
+        if: env.MODE == 'full' || env.MODE == 'study'
         uses: actions/cache/restore@v4
         with:
           path: data/warrant_raw
@@ -60,6 +60,10 @@ jobs:
         continue-on-error: true
         run: python warrant_fetch.py
 
+      - name: 只重建（不連網）
+        if: env.MODE == 'study'
+        run: python warrant_fetch.py --derive-only
+
       - name: 存進快取
         if: always() && env.MODE == 'full'
         uses: actions/cache/save@v4
@@ -68,7 +72,7 @@ jobs:
           key: warrant-raw-${{ github.run_id }}
 
       - name: 還原股價歷史
-        if: env.MODE == 'full'
+        if: always() && (env.MODE == 'full' || env.MODE == 'study')
         uses: actions/cache/restore@v4
         with:
           path: data/stock
@@ -78,11 +82,11 @@ jobs:
             finmind-hist-
 
       - name: H5 回測
-        if: env.MODE == 'full'
+        if: always() && (env.MODE == 'full' || env.MODE == 'study')
         run: python warrant_study.py
 
       - name: 結果下載區
-        if: always() && env.MODE == 'full'
+        if: always() && (env.MODE == 'full' || env.MODE == 'study')
         uses: actions/upload-artifact@v4
         with:
           name: warrant-h5
@@ -93,13 +97,13 @@ jobs:
           if-no-files-found: warn
 
       - name: 摘要
-        if: always() && env.MODE == 'full'
+        if: always() && (env.MODE == 'full' || env.MODE == 'study')
         run: |
           echo "### 權證 H5" >> $GITHUB_STEP_SUMMARY
           [ -f warrant_study_report.md ] && cat warrant_study_report.md >> $GITHUB_STEP_SUMMARY || echo "沒有報告" >> $GITHUB_STEP_SUMMARY
 
       - name: 抓取有問題就標紅
-        if: env.MODE == 'full' && steps.fetch.outcome == 'failure'
+        if: always() && env.MODE == 'full' && steps.fetch.outcome == 'failure'   # 沒有 always() 時前一步失敗會被跳過
         run: |
           echo "抓取被擋或中斷，看「抓權證」那一步。已抓到的已存進快取。"
           exit 1

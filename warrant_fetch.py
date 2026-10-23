@@ -80,7 +80,8 @@ def get(url, log=True):
         if status in STOP_HTTP:
             raise Stop("HTTP %d：%s" % (status, url))
         if html:
-            raise Stop("回應是網頁（可能被擋，HTTP %s）：%s" % (status, url))
+            snip = data[:300].decode("utf-8", "replace").replace("\n", " ")
+            raise Stop("回應是網頁（可能被擋，HTTP %s）：%s；開頭：%s" % (status, url, snip))
         if (status >= 500 or status == 0) and k < len(RETRY_WAIT):
             print("    HTTP %s，%d 秒後重試" % (status or err, RETRY_WAIT[k]))
             time.sleep(RETRY_WAIT[k])
@@ -269,8 +270,8 @@ def stock_names():
     names = {}
     p = os.path.join("data", "market.txt")
     with open(p, encoding="utf-8") as f:
-        next(f)
-        hdr = next(f).strip().split(",")
+        # 第一行是「TWLV1|日期|時間|筆數|code,name,mkt,…」：欄名在最後一個 | 之後
+        hdr = next(f).strip().split("|")[-1].split(",")
         ic, iN, iM = hdr.index("code"), hdr.index("name"), hdr.index("mkt")
         for line in f:
             r = line.rstrip("\n").split(",")
@@ -451,7 +452,7 @@ def main():
         if a and a[0] == "--probe":
             probe(a[1] if len(a) > 1 else (dt.datetime.now(TW) - dt.timedelta(days=1)).strftime("%Y%m%d"))
             return 0
-        if a and a[0] == "--derive-only":
+        if a and a[0] == "--derive-only":       # 不連網，只用已抓的資料
             return 0 if derive() > 0 else 4
         rc = run_fetch()
         derive()

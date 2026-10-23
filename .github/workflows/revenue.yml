@@ -112,7 +112,7 @@ jobs:
           [ -f revenue_report.md ] && head -40 revenue_report.md >> $GITHUB_STEP_SUMMARY || echo "沒有報告" >> $GITHUB_STEP_SUMMARY
 
       - name: 抓取有失敗就標紅
-        if: env.MODE == 'full' && steps.fetch.outcome == 'failure'
+        if: always() && env.MODE == 'full' && steps.fetch.outcome == 'failure'   # 沒有 always() 時前一步失敗會被跳過
         run: |
           echo "有月份抓取失敗或被擋，看「抓月營收」那一步的紀錄。已抓到的已存進快取，下次會接著抓。"
           exit 1
