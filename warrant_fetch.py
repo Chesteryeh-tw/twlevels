@@ -309,6 +309,7 @@ def derive():
     amt_all = amt_mapped = 0.0
     unmapped = {}
     chk = [0, 0]           # 官方標的代號與名稱比對都有的筆數、一致的筆數
+    diff, diff_seen, odd = [], set(), [0]
     for d in days:
         rows = []
         complete = True
@@ -343,6 +344,13 @@ def derive():
                 if uo and un:
                     chk[0] += 1
                     chk[1] += uo == un
+                    if uo != un and len(diff) < 12 and (d, uo, un) not in diff_seen:
+                        diff_seen.add((d, uo, un))
+                        diff.append("%s %s 官方=%s 名稱=%s" % (d, name, uo, un))
+                if uo and not uo.isdigit():
+                    odd[0] += 1
+                    if len(odd) < 6:
+                        odd.append("%s 官方標的欄=%r" % (name, uo))
                 if amt:
                     amt_all += amt
                     if u:
@@ -367,6 +375,7 @@ def derive():
     notice("權證整理：完整日 %d 天；成交金額對到標的 %.1f%%；官方標的代號 vs 名稱比對 %d／%d 一致；未對應前幾名（名稱前 4 字：金額億）%s" % (
         n_days, 100 * amt_mapped / amt_all if amt_all else 0, chk[1], chk[0],
         ", ".join("%s:%.1f" % (k, v / 1e8) for k, v in top)))
+    notice("權證整理檢查：官方與名稱不一致的例子 %s｜官方標的欄不是數字 %d 筆，例 %s" % (diff, odd[0], odd[1:]))
     return n_days
 
 
