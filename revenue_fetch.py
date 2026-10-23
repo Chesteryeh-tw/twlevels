@@ -124,7 +124,9 @@ def validate(data, mkt, y, m):
 
 
 def fetch_one(mkt, y, m):
-    """回傳 (原始 bytes, 資料列, 出表日期, 這次請求開始時間, 收完時間)；時間都是 UTC。"""
+    """回傳 (原始 bytes, 資料列, 出表日期, 這次請求開始時間, 收完時間)；時間都是 UTC。
+    重試只限：5xx、連線／逾時、內容截斷或格式不對（Bad）。401／403／407／429／451、網頁 → Blocked 整批停；
+    其他 4xx（例如 404 找不到這份檔）→ 直接判失敗、不重試、不換來源。"""
     last = None
     for k in range(len(RETRY_WAIT) + 1):
         started = utc_now()
@@ -132,22 +134,40 @@ def fetch_one(mkt, y, m):
             data = download(mkt, y, m)
             got = utc_now()
             body, gen = validate(data, mkt, y, m)
+            log_attempt(mkt, y, m, started, "ok", sha=hashlib.sha256(data).hexdigest())
             return data, body, gen, started, got
-        except Blocked:
+        except Blocked as e:
+            log_attempt(mkt, y, m, started, "blocked", error=str(e))
             raise
         except urllib.error.HTTPError as e:
+            log_attempt(mkt, y, m, started, "http_%d" % e.code)
             if e.code in STOP_HTTP:
                 raise Blocked("HTTP %d（對方拒絕或限流），整批停止" % e.code)
-            last = e                # 5xx 等暫時錯誤才走下面的重試
-            if k < len(RETRY_WAIT):
-                print("    %s %d-%02d 第 %d 次失敗：HTTP %d，%d 秒後重試" % (mkt, y, m, k + 1, e.code, RETRY_WAIT[k]))
-                time.sleep(RETRY_WAIT[k])
-        except Exception as e:      # 連線錯誤、截斷、格式不對才重試
+            if e.code < 500:
+                raise Bad("HTTP %d（不重試）" % e.code)
+            last = "HTTP %d" % e.code
+        except (urllib.error.URLError, OSError, Bad) as e:     # 連線、逾時、截斷、格式不對
+            log_attempt(mkt, y, m, started, "retryable", error=str(e))
             last = e
-            if k < len(RETRY_WAIT):
-                print("    %s %d-%02d 第 %d 次失敗：%s，%d 秒後重試" % (mkt, y, m, k + 1, e, RETRY_WAIT[k]))
-                time.sleep(RETRY_WAIT[k])
+        if k < len(RETRY_WAIT):
+            print("    %s %d-%02d 第 %d 次失敗：%s，%d 秒後重試" % (mkt, y, m, k + 1, last, RETRY_WAIT[k]))
+            time.sleep(RETRY_WAIT[k])
     raise Bad(str(last))
+
+
+ATTEMPTS = os.path.join(RAW, "attempts.jsonl")
+
+
+def log_attempt(mkt, y, m, started, result, **kw):
+    """每一次請求都追加一行（只增不改），跟 manifest 的「目前版本」分開。"""
+    try:
+        os.makedirs(RAW, exist_ok=True)
+        rec = dict(key="%s_%d%02d" % (mkt, y, m), request_started_at=started, logged_at=utc_now(), result=result)
+        rec.update(kw)
+        with open(ATTEMPTS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def load_manifest():
@@ -163,12 +183,37 @@ def load_manifest():
     return man
 
 
+def save_manifest(man):
+    os.makedirs(RAW, exist_ok=True)
+    tmp = MANIFEST + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(man, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, MANIFEST)
+
+
 def save_atomic(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
+
+
+def raw_path(mkt, ym, info):
+    """舊版（2026-10-23 以前）存在 {年月}.csv；新版用內容雜湊命名、寫了就不再改。"""
+    return os.path.join(RAW, mkt, info.get("file") or (ym + ".csv"))
+
+
+def store_immutable(mkt, ym, data, sha):
+    """原始檔用「年月.雜湊前 16 碼.csv」存，永不覆寫；同名已存在時先比對 bytes，不同就停。"""
+    name = "%s.%s.csv" % (ym, sha[:16])
+    p = os.path.join(RAW, mkt, name)
+    if os.path.exists(p):
+        if hashlib.sha256(open(p, "rb").read()).hexdigest() != sha:
+            raise ManifestBroken("%s 已存在但內容不同，停止（保留現場）" % p)
+        return name
+    save_atomic(p, data)
+    return name
 
 
 def num(s):
@@ -180,44 +225,83 @@ def num(s):
     return v if math.isfinite(v) else None
 
 
+def verify_file(p, sha, nbytes=None):
+    if not os.path.exists(p):
+        return "不見了"
+    data = open(p, "rb").read()
+    if hashlib.sha256(data).hexdigest() != sha or (nbytes is not None and len(data) != nbytes):
+        return "大小或 SHA-256 對不上"
+    return None
+
+
 def check_inputs(man):
-    """發布 panel 前重驗每一份標 ok 的原始檔：檔案在、大小與 SHA-256 跟 manifest 一樣、內容再驗一次。
+    """發布 panel 前重驗：每份目前版本（存在、bytes、SHA-256、列數、內容再驗）＋每個歷史版本的檔案雜湊。
     回傳 (合格清單 [(key, 資料列)], 問題清單)。有任何問題，呼叫的人就不能發布新 panel。"""
     good, problems = [], []
     for key in sorted(man):
         info = man[key]
-        if not info.get("ok"):
+        if not isinstance(info, dict):
+            problems.append("%s：manifest 紀錄格式不對" % key)
             continue
         try:
             mkt, ym = key.split("_")
             y, m = int(ym[:4]), int(ym[4:])
-        except ValueError:
+            assert mkt in MIN_ROWS and len(ym) == 6 and 1 <= m <= 12
+        except (ValueError, AssertionError):
             problems.append("%s：manifest 的鍵看不懂" % key)
             continue
-        p = os.path.join(RAW, mkt, ym + ".csv")
-        if not os.path.exists(p):
-            problems.append("%s：manifest 說合格，但原始檔不見了" % key)
+        for h in info.get("history", []):
+            if h.get("status") == "conflict":
+                continue          # 已記錄的衝突證據，本來就不是有效版本
+            err = verify_file(raw_path(mkt, ym, h), h.get("sha256"))
+            if err:
+                problems.append("%s：歷史版本 %s %s" % (key, h.get("file"), err))
+        if not info.get("ok"):
             continue
-        data = open(p, "rb").read()
-        if len(data) != info.get("bytes") or hashlib.sha256(data).hexdigest() != info.get("sha256"):
-            problems.append("%s：原始檔大小或 SHA-256 跟 manifest 對不上" % key)
+        p = raw_path(mkt, ym, info)
+        err = verify_file(p, info.get("sha256"), info.get("bytes"))
+        if err:
+            problems.append("%s：目前版本原始檔%s" % (key, err))
             continue
         try:
-            body, _ = validate(data, mkt, y, m)
+            body, _ = validate(open(p, "rb").read(), mkt, y, m)
         except (Bad, Blocked) as e:
             problems.append("%s：原始檔重驗不合格：%s" % (key, e))
+            continue
+        if info.get("rows") != len(body):
+            problems.append("%s：manifest 列數 %s 跟實際 %d 不同" % (key, info.get("rows"), len(body)))
             continue
         good.append((key, body))
     return good, problems
 
 
+def coverage_gaps(good):
+    """從 START 到目前最新合格月份，上市、上櫃每個月都要有；缺的列出來。"""
+    have = {k for k, _ in good}
+    if not have:
+        return ["一份合格的都沒有"]
+    last = max(k.split("_")[1] for k in have)
+    gaps, (y, m) = [], START
+    while "%d%02d" % (y, m) <= last:
+        for mkt in ("sii", "otc"):
+            if "%s_%d%02d" % (mkt, y, m) not in have:
+                gaps.append("%s_%d%02d" % (mkt, y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return gaps
+
+
 def build_panel(man):
     """把所有驗過的原始檔合成一張表。每列帶來源鍵（原始檔 SHA-256、抓取時間、pit_verified），
-    研究程式才追得回是哪一版。任何一份輸入有問題就不發布、保留上一份合格的 panel。"""
+    研究程式才追得回是哪一版。任何問題（含 manifest 不見、零份合格、月份有缺）就不發布、保留上一份。"""
+    panel = os.path.join(OUT, "panel.csv")
+    if not man:
+        print("沒有來源帳本（manifest 不存在或是空的），不發布 panel%s" % ("，保留上一份" if os.path.exists(panel) else ""))
+        return False
     good, problems = check_inputs(man)
+    problems += ["缺 %s" % g for g in coverage_gaps(good)]
     if problems:
-        print("原始檔有 %d 個問題，不發布新的 panel.csv（保留上一份）：" % len(problems))
-        for x in problems:
+        print("有 %d 個問題，不發布新的 panel.csv（保留上一份）：" % len(problems))
+        for x in problems[:50]:
             print("  " + x)
         return False
     out = []
@@ -228,14 +312,45 @@ def build_panel(man):
             out.append([mkt, r[2].strip(), ym, num(r[5]), num(r[6]), num(r[7]), num(r[9]), num(r[8]),
                         r[0].strip(), info["sha256"], info.get("captured_at", ""), "false"])
     os.makedirs(OUT, exist_ok=True)
-    tmp = os.path.join(OUT, "panel.csv.tmp")
+    tmp = panel + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["market", "code", "ym", "rev", "rev_prev", "rev_ly", "yoy_src", "mom_src", "generated",
                     "raw_sha256", "captured_at", "pit_verified"])
         w.writerows([["" if x is None else x for x in r] for r in out])
-    os.replace(tmp, os.path.join(OUT, "panel.csv"))
-    print("panel.csv：%d 列（實際驗過 %d 個市場月份）" % (len(out), len(good)))
+    os.replace(tmp, panel)
+    print("panel.csv：%d 列（實際驗過 %d 個市場月份，無缺月）" % (len(out), len(good)))
+    return True
+
+
+def record_version(man, key, mkt, ym, data, body, gen, started, got):
+    """新內容：存成不可變檔 → 舊版本驗過後進 history（驗不過就記成衝突證據）→ 立刻寫 manifest。"""
+    sha = hashlib.sha256(data).hexdigest()
+    old = man.get(key, {})
+    hist = list(old.get("history", []))
+    if old.get("ok") and old.get("sha256") == sha:
+        old.update(captured_at=got, request_started_at=started)   # 同內容重抓：只更新最近確認時間
+        man[key] = old
+        save_manifest(man)
+        return False
+    name = store_immutable(mkt, ym, data, sha)
+    if old.get("ok"):
+        err = verify_file(raw_path(mkt, ym, old), old.get("sha256"), old.get("bytes"))
+        entry = dict(file=old.get("file") or (ym + ".csv"), sha256=old.get("sha256"), bytes=old.get("bytes"),
+                     rows=old.get("rows"), generated=old.get("generated"),
+                     first_captured_at=old.get("first_captured_at") or old.get("captured_at"),
+                     captured_at=old.get("captured_at"), request_started_at=old.get("request_started_at"),
+                     superseded_at=got, status="ok" if not err else "conflict")
+        if err:
+            p = raw_path(mkt, ym, old)
+            entry["conflict"] = "舊版原始檔%s；實際 SHA-256 %s" % (
+                err, hashlib.sha256(open(p, "rb").read()).hexdigest() if os.path.exists(p) else "（無檔）")
+        hist.append(entry)
+        print("  %s 內容有變動，舊版保留%s" % (key, "" if not err else "（但舊檔驗不過，記成衝突）"))
+    man[key] = dict(ok=True, file=name, sha256=sha, rows=len(body), bytes=len(data), generated=gen,
+                    request_started_at=started, captured_at=got, first_captured_at=got,
+                    pit_verified=False, history=hist)
+    save_manifest(man)
     return True
 
 
@@ -243,9 +358,9 @@ def main():
     args = sys.argv[1:]
     if "--test" in args:
         for mkt in ("sii", "otc"):
-            data, body, gen = fetch_one(mkt, 2021, 1)
-            print("%s 2021-01：%d 列、%d bytes、出表日期 %s、SHA-256 %s"
-                  % (mkt, len(body), len(data), gen, hashlib.sha256(data).hexdigest()[:16]))
+            data, body, gen, started, got = fetch_one(mkt, 2021, 1)
+            print("%s 2021-01：%d 列、%d bytes、出表日期 %s、SHA-256 %s、收完 %s"
+                  % (mkt, len(body), len(data), gen, hashlib.sha256(data).hexdigest()[:16], got))
             for r in body[:3]:
                 print("   ", r[2], r[3], "當月", r[5], "去年當月", r[7], "年增%", r[9][:6])
             time.sleep(PAUSE)
@@ -263,54 +378,34 @@ def main():
     months = months_to_fetch()
     recent = set(months[-3:])           # 最近 3 個月可能還有更正，每次都重抓
     failed, blocked = [], None
-    for (y, m) in months:
-        for mkt in ("sii", "otc"):
-            key = "%s_%d%02d" % (mkt, y, m)
-            if man.get(key, {}).get("ok") and (y, m) not in recent:
-                continue
-            try:
-                data, body, gen, started, got = fetch_one(mkt, y, m)
-            except Blocked as e:
-                blocked = "%s：%s" % (key, e)
-                man.setdefault(key, {})["last_blocked"] = dict(at=utc_now(), error=str(e))
-                break
-            except Bad as e:
-                failed.append("%s：%s" % (key, e))
-                rec = man.setdefault(key, {})
-                # 失敗不能抹掉之前合格的版本：只記錄這次失敗，ok 狀態照舊
-                rec["last_error"] = dict(at=utc_now(), error=str(e))
-                rec.setdefault("ok", False)
+    try:
+        for (y, m) in months:
+            for mkt in ("sii", "otc"):
+                key = "%s_%d%02d" % (mkt, y, m)
+                if man.get(key, {}).get("ok") and (y, m) not in recent:
+                    continue
+                try:
+                    data, body, gen, started, got = fetch_one(mkt, y, m)
+                except Blocked as e:
+                    blocked = "%s：%s" % (key, e)
+                    break
+                except Bad as e:
+                    failed.append("%s：%s" % (key, e))
+                    rec = man.setdefault(key, {})
+                    rec.setdefault("ok", False)      # 失敗不能抹掉之前合格的版本
+                    save_manifest(man)
+                    time.sleep(PAUSE)
+                    continue
+                record_version(man, key, mkt, "%d%02d" % (y, m), data, body, gen, started, got)
+                print("  %s：%d 列" % (key, len(body)))
                 time.sleep(PAUSE)
-                continue
-            sha = hashlib.sha256(data).hexdigest()
-            p = os.path.join(RAW, mkt, "%d%02d.csv" % (y, m))
-            old = man.get(key, {})
-            hist = list(old.get("history", []))
-            if old.get("ok") and old.get("sha256") != sha and os.path.exists(p):
-                # 數字變了（更正）：舊版另存、記進 history（只增不改），不覆蓋成「以前就是這個數字」
-                kept = p[:-4] + "." + old.get("captured_at", "old").replace(":", "").replace("-", "") + ".csv"
-                os.replace(p, kept)
-                hist.append(dict(sha256=old.get("sha256"), bytes=old.get("bytes"), rows=old.get("rows"),
-                                 generated=old.get("generated"), captured_at=old.get("captured_at"),
-                                 file=os.path.basename(kept), superseded_at=got))
-                print("  %s 內容有變動，舊版另存" % key)
-            save_atomic(p, data)
-            # 同一份內容第一次被我們看到的時間（只證明我們何時看到，不是官方首次公布時間）
-            if old.get("ok") and old.get("sha256") == sha:
-                first = old.get("first_captured_at") or old.get("captured_at")
-            else:
-                first = got
-            man[key] = dict(ok=True, sha256=sha, rows=len(body), bytes=len(data), generated=gen,
-                            request_started_at=started, captured_at=got, first_captured_at=first,
-                            pit_verified=False, history=hist)
-            print("  %s：%d 列" % (key, len(body)))
-            time.sleep(PAUSE)
-        if blocked:
-            break
-    os.makedirs(RAW, exist_ok=True)
-    tmp = MANIFEST + ".tmp"
-    json.dump(man, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1, sort_keys=True)
-    os.replace(tmp, MANIFEST)
+            if blocked:
+                break
+    except ManifestBroken as e:
+        save_manifest(man)
+        print("停止：%s" % e)
+        sys.exit(3)
+    save_manifest(man)
     published = build_panel(man)
     ok = sum(1 for v in man.values() if v.get("ok"))
     print("完成：%d／%d 份合格" % (ok, len(months) * 2))
