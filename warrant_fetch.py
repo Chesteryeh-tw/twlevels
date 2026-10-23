@@ -362,6 +362,40 @@ def derive():
 
 # ---------------------------------------------------------------- 探測
 
+PROBE_EXTRA = {
+    "t86_rwd_0999": "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=%s&selectType=0999",
+    "t86_ALL": "https://www.twse.com.tw/fund/T86?response=json&date=%s&selectType=ALL",
+    "mi_rwd_0999": "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=%s&type=0999",
+}
+
+
+def probe2(day):
+    """第二輪探測：列出每張表的標題、欄位、筆數；T86 ALL 裡 6 碼權證的筆數。"""
+    for k, u in list(KINDS.items())[2:] + list(PROBE_EXTRA.items()):
+        data, status, _, _ = get(u % day, log=False)
+        time.sleep(PAUSE)
+        try:
+            js = json.loads(data.decode("utf-8-sig"))
+        except ValueError:
+            notice("探測2 %s %s：HTTP %s 不是 JSON" % (k, day, status))
+            continue
+        if js.get("tables") is not None:
+            desc = ["%s：%s 筆 %d" % (t.get("title"), t.get("fields"), len(t.get("data") or [])) for t in js["tables"]]
+            notice("探測2 %s %s stat=%s 表 %d 張｜%s" % (k, day, js.get("stat"), len(js["tables"]), " ‖ ".join(desc)))
+        else:
+            rows = js.get("data") or []
+            w = [r for r in rows if len(str(r[0]).strip()) == 6]
+            notice("探測2 %s %s stat=%s 筆數 %d、6 碼 %d；鍵 %s；6 碼前兩筆 %s" % (
+                k, day, js.get("stat"), len(rows), len(w), sorted(js)[:12], w[:2]))
+    data, status, _, _ = get("https://openapi.twse.com.tw/v1/opendata/t187ap36_L", log=False)
+    js = json.loads(data.decode("utf-8-sig"))
+    ds = sorted(r.get("申請發行日期", "") for r in js)
+    codes = {r.get("權證代號") for r in js}
+    notice("t187ap36_L：%d 筆、權證代號 %d 個、申請發行日期 %s～%s；各年筆數 %s" % (
+        len(js), len(codes), ds[0], ds[-1],
+        sorted({d[:3]: sum(1 for x in ds if x[:3] == d[:3]) for d in ds}.items())))
+
+
 def probe(day):
     for k in KINDS:
         data, status, _, _ = get(KINDS[k] % day, log=False)
@@ -401,6 +435,10 @@ def probe(day):
 def main():
     a = sys.argv[1:]
     try:
+        if a and a[0] == "--probe2":
+            for d in a[1:] or ["20261022"]:
+                probe2(d)
+            return 0
         if a and a[0] == "--probe":
             probe(a[1] if len(a) > 1 else (dt.datetime.now(TW) - dt.timedelta(days=1)).strftime("%Y%m%d"))
             return 0

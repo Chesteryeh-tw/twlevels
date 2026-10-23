@@ -9,7 +9,7 @@ on:
       mode:
         description: "probe＝抓一天看欄位（1 分鐘）；full＝從 2024-10 抓到昨天＋回測"
         type: choice
-        options: [probe, full]
+        options: [probe, probe2, full]
         default: probe
       probe_date:
         description: "probe 用的日期 YYYYMMDD（空白＝昨天）"
@@ -40,6 +40,10 @@ jobs:
       - name: 探測（不寫檔）
         if: env.MODE == 'probe'
         run: python warrant_fetch.py --probe ${{ inputs.probe_date }}
+
+      - name: 探測第二輪（表格欄位、T86 其他寫法；不寫檔）
+        if: env.MODE == 'probe2'
+        run: python warrant_fetch.py --probe2 ${{ inputs.probe_date }}
 
       - name: 還原已抓的權證資料
         if: env.MODE == 'full'
