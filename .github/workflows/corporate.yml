@@ -1,0 +1,59 @@
+name: 公司行動事件表（證交所四表＋櫃買三表）
+
+# 官方總表一次查一個月（2021-01 起），間隔 4～7 秒隨機；被拒、轉址、回網頁就整批停（不換位址）。
+# 原始回應只放 Actions 快取（corp-raw-），只 commit 整理後的 data/corporate_actions.csv 與比對報告。
+# 跟 warrant.yml 用同一個 concurrency 群組（warrant），避免兩個工作同時打證交所。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: warrant
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 離線測試
+        run: python test_corporate_actions.py
+      - name: 還原已抓的原始檔
+        uses: actions/cache/restore@v4
+        with:
+          path: data/corp_raw
+          key: corp-raw-
+          restore-keys: |
+            corp-raw-
+      - name: 抓取、建表、比對價格斷點
+        id: fetch
+        continue-on-error: true
+        run: python corporate_actions.py
+      - name: 存進快取
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/corp_raw
+          key: corp-raw-${{ github.run_id }}
+      - name: 推回事件表與比對報告
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/corporate_actions.csv corporate_actions_match.md
+          if git diff --cached --quiet; then echo "沒有變動"; else
+            git commit -m "公司行動事件表（官方總表）"
+            git pull --rebase --autostash
+            git push
+          fi
+      - name: 抓取有問題就標紅
+        if: always() && steps.fetch.outcome == 'failure'
+        run: |
+          echo "抓取被拒或有錯，看「抓取、建表、比對價格斷點」那一步。已抓到的已存快取，下次會接著抓。"
+          exit 1

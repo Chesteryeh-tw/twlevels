@@ -43,10 +43,18 @@ jobs:
           restore-keys: |
             revenue-raw-
 
+      - name: 讀公司行動原始檔快取（corporate.yml 存的）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/corp_raw
+          key: corp-raw-
+          restore-keys: |
+            corp-raw-
+
       - name: 摘要
         run: |
           echo "### 快取保溫" >> $GITHUB_STEP_SUMMARY
-          for d in data/stock data/chip_fm data/revenue_raw; do
+          for d in data/stock data/chip_fm data/revenue_raw data/corp_raw; do
             if [ -d "$d" ]; then
               echo "- $d：$(du -sh $d | cut -f1)，$(find $d -type f | wc -l) 個檔" >> $GITHUB_STEP_SUMMARY
             else
