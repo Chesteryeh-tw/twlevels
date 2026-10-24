@@ -261,7 +261,7 @@ def match(rows, ev):
         k = "/".join(sorted({r["type"] for r in rs}))
         kinds[k] = kinds.get(k, 0) + 1
     L = ["# 價格斷點 × 官方公司行動表", "",
-         "價格斷點＝repo data/stock（未還原）開盤比前一天收盤差超過 11%，共 %d 筆；對上官方事件 %d 筆，對不上 %d 筆。" % (len(ev), len(hit), len(miss)),
+         "價格斷點＝repo data/stock（未還原）開盤比前一天收盤差超過 11%%，共 %d 筆；對上官方事件 %d 筆，對不上 %d 筆。" % (len(ev), len(hit), len(miss)),
          "", "對上的類型：" + "、".join("%s %d" % kv for kv in sorted(kinds.items())), "",
          "## 對不上的（不猜原因，待查）", "| 代號 | 日期 | 前收 | 開盤 | 跳動 % |", "|---|---|---|---|---|"]
     L += ["| %s | %s | %.2f | %.2f | %+.1f |" % e for e, _ in miss]
