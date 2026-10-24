@@ -409,5 +409,69 @@ code = run_main()
 rf.save_atomic = REAL_SAVE
 check("P4c 發布 meta 失敗 → panel.csv 還原成上一份", open(PANEL(), "rb").read() == panel_before and open(meta_path, "rb").read() == meta_before_bytes and code == 4, code)
 
+# ---- GPT 2026-10-24 第二輪（SUS v2.1 複核）：P1 計畫檔損壞、P4 單一指標發布 ----
+import revenue_panel as rp
+# P1e plan.json 損壞但 plans.jsonl 存在 → --panel-only 不得縮短範圍後成功
+fresh(((2021, 1),))
+run_main()
+rf.months_to_fetch = lambda today=None: [(2021, 1), (2021, 2), (2021, 3)]
+rf.download = lambda *a: (_ for _ in ()).throw(rf.Blocked("synthetic block"))
+run_main()                                               # 被擋，plan 記 202103
+panel_before = open(PANEL(), "rb").read()
+open(rf.PLAN, "w").write("{broken")
+code = run_main(["--panel-only"])
+check("P1e plan.json 損壞 → --panel-only exit 4，不發布", code == 4 and open(PANEL(), "rb").read() == panel_before, code)
+# P1f plan.json 被刪、plans.jsonl 還在 → 同樣拒絕
+os.remove(rf.PLAN)
+code = run_main(["--panel-only"])
+check("P1f plan.json 不見但有 plans.jsonl → 拒絕", code == 4 and open(PANEL(), "rb").read() == panel_before, code)
+# P1g 欄位矛盾（planned_end 跟 planned_keys 對不上）→ PlanBroken
+json.dump(dict(planned_start="202101", planned_end="202103", planned_keys=["sii_202101", "otc_202101"], planned_at="x"), open(rf.PLAN, "w"))
+try:
+    rf.load_plan(); check("P1g 內容矛盾 → PlanBroken", False, "沒丟例外")
+except rf.PlanBroken:
+    check("P1g 內容矛盾 → PlanBroken", True)
+# P1h 舊快取（沒有 plan.json、沒有 plans.jsonl）→ 相容，None，可發布
+fresh(((2021, 1),))
+run_main()
+os.remove(rf.PLAN); os.remove(rf.PLANS)
+check("P1h 舊快取沒有計畫檔 → load_plan 回 None、--panel-only 仍可發布", rf.load_plan() is None and run_main(["--panel-only"]) == 0)
+
+# P4d 指標 current.json 是權威發布點；正常發布後讀取器讀 generation 並核雜湊
+fresh()
+run_main()
+ptr = json.load(open(os.path.join(rf.OUT, "current.json"), encoding="utf-8"))
+pp, mp, how = rp.resolve(rf.OUT)
+check("P4d 正常發布後 resolve 指到 generation，雜湊一致", ptr["generation"] in pp and
+      ptr["panel_sha256"] == hashlib.sha256(open(pp, "rb").read()).hexdigest(), (pp, how))
+# P4e 兩次正式寫入之間被打斷（BaseException，不是 OSError）：panel 已換、meta 仍舊 → 指標仍指上一代，讀取器讀到完整上一代
+old_panel = open(pp, "rb").read()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
+class Crash(BaseException):
+    pass
+def crash_meta(path, data):
+    if str(path) == os.path.join(rf.OUT, "panel_meta.json"):
+        raise Crash()
+    return REAL_SAVE(path, data)
+rf.save_atomic = crash_meta
+try:
+    run_main()
+except Crash:
+    pass
+rf.save_atomic = REAL_SAVE
+pp2, mp2, _ = rp.resolve(rf.OUT)
+root_mismatch = open(PANEL(), "rb").read() != open(pp2, "rb").read()
+check("P4e 被打斷：指標仍指上一代、讀取器讀到完整上一代；根目錄相容檔已不一致", open(pp2, "rb").read() == old_panel and root_mismatch)
+# P4f 下一次啟動 repair_compat 把根目錄相容檔補回指標指到的 generation
+rf.repair_compat()
+check("P4f 啟動時 repair_compat 補回相容檔", open(PANEL(), "rb").read() == open(pp2, "rb").read() and
+      open(mp, "rb").read() == open(mp2, "rb").read())
+# P4g generation 的 panel 被改過 → 讀取器拒用（不退回根目錄）
+open(pp2, "ab").write(b"x")
+try:
+    rp.resolve(rf.OUT); check("P4g generation 被改 → resolve 拒用", False, "沒丟例外")
+except SystemExit:
+    check("P4g generation 被改 → resolve 拒用", True)
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

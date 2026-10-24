@@ -150,9 +150,10 @@ def load_market_meta():
 def load_revenue():
     """月營收（revenue_fetch.py 產生的 data/revenue/panel.csv）。沒有就回空的，回測照舊。
     回傳 code -> 依可用日排序的 [(cut, yoy, 創12個月新高)]：M 月營收在 M+1 月 11 日（含）以後的開盤才用得到。"""
-    p = os.path.join("data", "revenue", "panel.csv")
+    import revenue_panel
+    p, _mp, _how = revenue_panel.resolve(os.path.join("data", "revenue"))   # 核過雜湊的 panel；不一致 → 停
     out = defaultdict(list)
-    if not os.path.exists(p):
+    if not p:
         return out
     raw = defaultdict(dict)
     for r in csv.DictReader(open(p, encoding="utf-8")):

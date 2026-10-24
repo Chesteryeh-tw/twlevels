@@ -309,11 +309,28 @@ def write_plan(months):
     return rec
 
 
+class PlanBroken(Exception):
+    pass
+
+
 def load_plan():
-    try:
-        return json.load(open(PLAN, encoding="utf-8"))
-    except (OSError, ValueError):
+    """舊快取從沒建過計畫 → None（相容）；曾經有過計畫（plan.json 或 plans.jsonl 存在）卻讀不了、欄位不全、
+    內容自相矛盾 → PlanBroken，呼叫端不得縮短範圍後繼續發布（GPT P1）。"""
+    if not os.path.exists(PLAN):
+        if os.path.exists(PLANS) and os.path.getsize(PLANS) > 0:
+            raise PlanBroken("plan.json 不見了，但 plans.jsonl 顯示曾經有計畫")
         return None
+    try:
+        rec = json.load(open(PLAN, encoding="utf-8"))
+        s, e, keys = rec["planned_start"], rec["planned_end"], rec["planned_keys"]
+        ok = (isinstance(s, str) and isinstance(e, str) and len(s) == 6 and len(e) == 6 and s.isdigit() and e.isdigit()
+              and s <= e and isinstance(keys, list) and keys and all(isinstance(k, str) and "_" in k for k in keys)
+              and min(k.split("_")[1] for k in keys) == s and max(k.split("_")[1] for k in keys) == e)
+    except (OSError, ValueError, KeyError, TypeError) as ex:
+        raise PlanBroken("plan.json 讀不了或欄位不全：%s" % ex)
+    if not ok:
+        raise PlanBroken("plan.json 內容自相矛盾（起訖與 planned_keys 對不上）")
+    return rec
 
 
 def requested_end(man):
@@ -341,6 +358,25 @@ def coverage_gaps(good, end):
     return gaps
 
 
+def repair_compat():
+    """啟動時：指標指到的 generation 完整，但根目錄相容檔跟它不一致（上次發布被打斷）→ 用該 generation 補回。
+    指標或 generation 壞了就不動，讀取器會拒用。"""
+    ptr_path = os.path.join(OUT, "current.json")
+    if not os.path.exists(ptr_path):
+        return
+    try:
+        import revenue_panel
+        pp, mp, _ = revenue_panel.resolve(OUT)
+    except SystemExit as e:
+        print("repair_compat：%s；不動根目錄檔" % e)
+        return
+    for src, dst in ((pp, os.path.join(OUT, "panel.csv")), (mp, os.path.join(OUT, "panel_meta.json"))):
+        data = open(src, "rb").read()
+        if not os.path.exists(dst) or open(dst, "rb").read() != data:
+            REAL_SAVE_ATOMIC(dst, data)
+            print("repair_compat：%s 已用 %s 補回" % (os.path.basename(dst), os.path.basename(os.path.dirname(src))))
+
+
 def build_panel(man):
     """把所有驗過的原始檔合成一張表。每列帶來源鍵（原始檔 SHA-256、抓取時間、pit_verified），
     研究程式才追得回是哪一版。任何問題（含 manifest 不見、零份合格、月份有缺）就不發布、保留上一份。"""
@@ -349,7 +385,12 @@ def build_panel(man):
         print("沒有來源帳本（manifest 不存在或是空的），不發布 panel%s" % ("，保留上一份" if os.path.exists(panel) else ""))
         return False
     good, problems = check_inputs(man)
-    end = requested_end(man)
+    try:
+        end = requested_end(man)
+        plan = load_plan() or {}
+    except PlanBroken as e:
+        print("計畫檔有問題（%s），不發布新的 panel（保留上一份）；請人工檢查 plan.json／plans.jsonl" % e)
+        return False
     problems += ["缺 %s" % g for g in coverage_gaps(good, end)]
     if AUDIT_FAILED:
         problems += ["請求紀錄寫不進去（證據不完整）：%s" % x for x in AUDIT_FAILED]
@@ -373,7 +414,6 @@ def build_panel(man):
     panel_bytes = buf.getvalue().encode("utf-8")
     psha = hashlib.sha256(panel_bytes).hexdigest()
     observed = max(k.split("_")[1] for k, _ in good)
-    plan = load_plan() or {}
     gen_id = "%s-%s" % (utc_now().replace(":", "").replace("-", ""), psha[:12])
     meta = dict(generation=gen_id, panel_sha256=psha, requested_start="%d%02d" % START, requested_end=end,
                 planned_end=plan.get("planned_end"), observed_end=observed, months_verified=len(good), rows=len(out),
@@ -390,9 +430,16 @@ def build_panel(man):
                 json.load(open(os.path.join(gdir, "panel_meta.json"), encoding="utf-8")).get("panel_sha256") != psha:
             raise OSError("generation 重讀對不上")
         # 2) 發布：先 panel、後 meta；第二個失敗就把第一個還原
+        # 相容匯出（根目錄 panel.csv、panel_meta.json）先寫，指標 current.json 最後換：指標是唯一的發布點，
+        # 中途被打斷時指標仍指向完整的上一代，讀取器（revenue_panel.resolve）不會用到新舊混合的資料。
+        ptr_path = os.path.join(OUT, "current.json")
+        old[ptr_path] = open(ptr_path, "rb").read() if os.path.exists(ptr_path) else None
+        ptr_bytes = json.dumps(dict(generation=gen_id, panel_sha256=psha, published_at=meta["published_at"]),
+                               ensure_ascii=False).encode("utf-8")
         try:
             save_atomic(panel, panel_bytes)
             save_atomic(meta_path, meta_bytes)
+            save_atomic(ptr_path, ptr_bytes)
         except OSError:
             for p, data in old.items():
                 if data is None:
@@ -479,6 +526,7 @@ def main():
     except ManifestBroken as e:
         print("停止：%s。檔案保留不動，請人工檢查，不會自動整批重抓。" % e)
         sys.exit(3)
+    repair_compat()
     if "--panel-only" in args:
         if not build_panel(man):
             sys.exit(4)
