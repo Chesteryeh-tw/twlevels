@@ -14,7 +14,8 @@
 規則（同 revenue_fetch.py）：
   HTTP 401／403／407／429／451 或回應是網頁 → 整批停，不重試、不換來源或身分。
   5xx、連線錯誤 → 等 10／30／60 秒重試。其他 4xx 直接記失敗。
-  每次請求間隔 PAUSE 秒。原始回應 gzip 存檔＋SHA-256＋請求時間；每份成功立刻原子寫帳本；attempts.jsonl 只增不改。
+  每次請求間隔在 pace.json 的範圍內隨機（預設 4～7 秒，使用者 10-24 決定）；被擋一次，上限加 1 秒（4～8、4～9…），到 12 秒還被擋就不再自動續抓。
+ 原始回應 gzip 存檔＋SHA-256＋請求時間；每份成功立刻原子寫帳本；attempts.jsonl 只增不改。
   時間預算用完就正常結束，下次從帳本接著抓。
 
 用法：
@@ -22,11 +23,34 @@
   python warrant_fetch.py                      從 START 抓到昨天（台灣時間）
   python warrant_fetch.py --derive-only        只重建 derived/
 """
-import csv, datetime as dt, gzip, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import csv, datetime as dt, gzip, hashlib, json, os, random, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 START = "20241001"
 RAW = os.path.join("data", "warrant_raw")
-PAUSE = 4
+PAUSE = 4            # 探測用
+PACE_FILE = os.path.join(RAW, "pace.json")
+PACE_DEFAULT = (4.0, 7.0)
+PACE_MAX_HI = 12.0
+
+
+def load_pace():
+    try:
+        with open(PACE_FILE, encoding="utf-8") as f:
+            p = json.load(f)
+        return float(p["lo"]), float(p["hi"])
+    except (OSError, ValueError, KeyError):
+        return PACE_DEFAULT
+
+
+def save_pace(lo, hi, reason):
+    os.makedirs(RAW, exist_ok=True)
+    with open(PACE_FILE, "w", encoding="utf-8") as f:
+        json.dump(dict(lo=lo, hi=hi, updated=utc_now(), reason=reason), f, ensure_ascii=False)
+
+
+def pause():
+    lo, hi = load_pace()
+    time.sleep(random.uniform(lo, hi))
 BUDGET_MIN = float(os.environ.get("WARRANT_BUDGET_MIN", "290"))
 STOP_HTTP = {401, 403, 407, 429, 451}
 RETRY_WAIT = (10, 30, 60)
@@ -144,7 +168,7 @@ def trading_days(today):
             data = open(p, "rb").read()
         else:
             data, status, _, _ = get("https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=%s01" % ym)
-            time.sleep(PAUSE)
+            pause()
             if status != 200:
                 raise Stop("開市日 %s HTTP %s" % (ym, status))
             if ym != cur:
@@ -202,6 +226,9 @@ def fetch_one(man, kind, day):
 
 def run_fetch():
     t0 = time.time()
+    if os.path.exists(PACE_FILE) and json.load(open(PACE_FILE, encoding="utf-8")).get("reason") == "blocked_at_max":
+        notice("權證：上次在最慢間隔仍被擋，不自動續抓；要人刪除 pace.json 或改設定")
+        return 3
     today = dt.datetime.now(TW).strftime("%Y%m%d")
     man = load_manifest()
     days = trading_days(today)
@@ -217,18 +244,25 @@ def run_fetch():
             ok = fetch_one(man, k, d)
         except Stop as e:
             save_manifest(man)
-            notice("權證：被擋或異常，整批停：%s（已抓 %d 份）" % (e, done))
+            lo, hi = load_pace()
+            if hi + 1 > PACE_MAX_HI:
+                save_pace(lo, hi, "blocked_at_max")
+                notice("權證：被擋，間隔已到 %g～%g 秒仍被擋，停止自動續抓（要人決定）：%s（已抓 %d 份）" % (lo, hi, e, done))
+                return 3
+            save_pace(lo, hi + 1, "blocked")
+            notice("權證：被擋，整批停；下次間隔改 %g～%g 秒：%s（已抓 %d 份）" % (lo, hi + 1, e, done))
             return 2
         save_manifest(man)
         done += ok
         fail += not ok
         if (i + 1) % 100 == 0:
             print("  %d／%d" % (i + 1, len(todo)))
-        time.sleep(PAUSE)
+        pause()
     st = {}
     for v in man.values():
         st[v.get("status")] = st.get(v.get("status"), 0) + 1
-    notice("權證抓取：本次成功 %d、失敗或空 %d；帳本 %s；開市日 %d 天" % (done, fail, st, len(days)))
+    lo, hi = load_pace()
+    notice("權證抓取：本次成功 %d、失敗或空 %d；帳本 %s；開市日 %d 天；間隔 %g～%g 秒" % (done, fail, st, len(days), lo, hi))
     return 0
 
 

@@ -3,7 +3,11 @@ name: 權證官方日資料 ＋ H5 認購買超排行
 # 2026-10-24 新增（研究_權證分點 H5）。只抓證交所公開的 T86 權證類別、MI_INDEX 權證行情、FMTQIK。
 # 原始檔只放 Actions 快取，不進 repo；結果寫成 Actions 註記＋下載區（30 天）。
 # 不要跟 update.yml、finmind.yml 同時跑（都會打證交所）。
+# 2026-10-24 使用者同意：每天台灣時間 03:10 自動接著抓（抓完後每天只補前一天 4 份）；間隔 4～7 秒隨機，
+# 被擋一次上限 +1 秒，到 12 秒還被擋就停止自動續抓、標紅等人處理。
 on:
+  schedule:
+    - cron: '10 19 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -18,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  actions: write        # 只用來刪掉舊的權證快取（每次存一份新的，舊的不刪會把 FinMind 股價快取擠掉）
 
 concurrency:
   group: warrant
@@ -28,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      MODE: ${{ inputs.mode || 'probe' }}
+      MODE: ${{ inputs.mode || 'full' }}     # 排程觸發沒有 inputs → full
       WARRANT_BUDGET_MIN: "290"
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +75,19 @@ jobs:
         with:
           path: data/warrant_raw
           key: warrant-raw-${{ github.run_id }}
+
+      - name: 刪掉舊的權證快取（只留剛存的這份）
+        if: always() && env.MODE == 'full'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          keep="warrant-raw-${{ github.run_id }}"
+          gh cache list --repo "${{ github.repository }}" --key warrant-raw- --limit 100 --json key --jq '.[].key' \
+            | while read k; do
+                if [ "$k" != "$keep" ] && gh cache list --repo "${{ github.repository }}" --key "$keep" --json key --jq '.[].key' | grep -qx "$keep"; then
+                  gh cache delete "$k" --repo "${{ github.repository }}" && echo "刪除 $k"
+                fi
+              done
 
       - name: 還原股價歷史
         if: always() && (env.MODE == 'full' || env.MODE == 'study')

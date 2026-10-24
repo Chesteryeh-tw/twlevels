@@ -7,7 +7,8 @@ sys.path.insert(0, HERE)
 import warrant_fetch as wf
 import warrant_study as ws
 
-wf.time.sleep = lambda s: None
+wf.time.sleep = lambda s: SLEEPS.append(s)
+SLEEPS = []
 FAILS = []
 
 
@@ -135,6 +136,18 @@ calls = []
 wf.urllib.request.urlopen = fake_urlopen(respond, calls, override=lambda k: (403, b"no") if k == 2 else (None, None))
 rc = wf.run_fetch()
 check("W7 403 → 整批停、回傳 2、只打 2 次", rc == 2 and len(calls) == 2, (rc, len(calls)))
+check("W7b 被擋後間隔上限 +1 秒（4～8）", wf.load_pace() == (4.0, 8.0), wf.load_pace())
+check("W7c 間隔在範圍內隨機", SLEEPS and all(4 <= x <= 8 for x in SLEEPS[-3:]) and len(set(SLEEPS)) > 1, SLEEPS[-5:])
+wf.save_pace(4.0, 12.0, "blocked")
+calls = []
+wf.urllib.request.urlopen = fake_urlopen(respond, calls, override=lambda k: (403, b"no") if k == 2 else (None, None))
+rc = wf.run_fetch()
+check("W7d 已到 12 秒上限又被擋 → 回傳 3、記下不再自動續抓", rc == 3 and wf.load_pace() == (4.0, 12.0), (rc, wf.load_pace()))
+calls = []
+wf.urllib.request.urlopen = fake_urlopen(respond, calls)
+rc = wf.run_fetch()
+check("W7e 之後的排程不再連線", rc == 3 and len(calls) == 0, (rc, len(calls)))
+os.remove(wf.PACE_FILE)
 # 網頁回應 → 停
 shutil.rmtree(wf.RAW)
 calls = []
