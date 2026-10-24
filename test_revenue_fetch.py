@@ -473,5 +473,23 @@ try:
 except SystemExit:
     check("P4g generation 被改 → resolve 拒用", True)
 
+# ---- 早年試抓（SUS v2.3 第 7 節）----
+fresh()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, ym="106/12")
+code = run_main(["--early-probe", "201712"])
+files = sorted(os.listdir(os.path.join(rf.RAW, "early")))
+check("E1 早年試抓：存 2 份原始檔、不建 manifest 與 panel、exit 0", code == 0 and len(files) == 2 and
+      not os.path.exists(rf.MANIFEST) and not os.path.exists(PANEL()), (code, files))
+fresh()
+rf.download = lambda mkt, y, m: b"<html>captcha</html>"
+code = run_main(["--early-probe", "201712"])
+check("E2 早年試抓拿到網頁 → exit 2，不存檔", code == 2 and not os.path.exists(os.path.join(rf.RAW, "early")) or
+      (code == 2 and not os.listdir(os.path.join(rf.RAW, "early"))), code)
+fresh()
+def h403(*a):
+    raise urllib.error.HTTPError(rf.URL, 403, "x", {}, io.BytesIO(b"forbidden"))
+rf.download = h403
+check("E3 早年試抓 403 → exit 2（停）", run_main(["--early-probe", "201712"]) == 2)
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

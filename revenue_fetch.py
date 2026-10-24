@@ -506,8 +506,67 @@ def record_version(man, key, mkt, ym, data, body, gen, started, got):
     return True
 
 
+def early_probe(ym):
+    """SUS 事先登記 v2.3 第 7 節：補抓早年營收前，先抓指定月份上市、上櫃各 1 份，只看格式、列數、重複代號，
+    不碰 manifest、不建 panel、不看績效。原始檔存 data/revenue_raw/early/（不進 repo）。被擋就停。"""
+    y, m = int(ym[:4]), int(ym[4:6])
+    os.makedirs(os.path.join(RAW, "early"), exist_ok=True)
+    rows_out = []
+    for mkt in ("sii", "otc"):
+        started = utc_now()
+        try:
+            data = download(mkt, y, m)
+        except urllib.error.HTTPError as e:
+            ebody = (e.read() or b"")[:2000].lower()
+            blocked = e.code in STOP_HTTP or b"<html" in ebody or b"<!doctype" in ebody or b"captcha" in ebody
+            log_attempt(mkt, y, m, started, "blocked" if blocked else "http_%d" % e.code)
+            print("::notice::early %s %s：HTTP %d%s" % (mkt, ym, e.code, "（被擋，停止）" if blocked else ""))
+            if blocked:
+                sys.exit(2)
+            rows_out.append((mkt, "HTTP %d" % e.code))
+            continue
+        except (urllib.error.URLError, OSError) as e:
+            log_attempt(mkt, y, m, started, "retryable", error=str(e))
+            print("::notice::early %s %s：連線失敗 %s" % (mkt, ym, e))
+            rows_out.append((mkt, "連線失敗"))
+            continue
+        sha = hashlib.sha256(data).hexdigest()
+        log_attempt(mkt, y, m, started, "early_probe", sha=sha)
+        head = data[:2000].lower()
+        if b"<html" in head or b"<!doctype" in head or b"captcha" in head:
+            print("::notice::early %s %s：拿到的是網頁，停止" % (mkt, ym))
+            sys.exit(2)
+        with open(os.path.join(RAW, "early", "%s_%s_%s.csv" % (mkt, ym, sha[:12])), "wb") as f:
+            f.write(data)
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            rows_out.append((mkt, "不是 UTF-8，%d bytes，sha %s" % (len(data), sha[:12])))
+            continue
+        rows = [r for r in csv.reader(io.StringIO(text)) if any(x.strip() for x in r)]
+        body = rows[1:] if rows else []
+        codes = [r[2].strip() for r in body if len(r) > 2]
+        ok_head = bool(rows) and [h.strip() for h in rows[0]] == HEADER
+        try:
+            validate(data, mkt, y, m)
+            strict = "嚴格驗證通過"
+        except (Bad, Blocked) as e:
+            strict = "嚴格驗證不過：%s" % e
+        msg = "%s %s：%d bytes、sha %s、表頭%s、%d 列、代號重複 %d、欄數非 14 的 %d 列；%s" % (
+            mkt, ym, len(data), sha[:12], "對得上" if ok_head else "對不上 %s" % (rows[0] if rows else "空檔"),
+            len(body), len(codes) - len(set(codes)), sum(1 for r in body if len(r) != 14), strict)
+        print(msg)
+        print("::notice::early " + msg)
+        rows_out.append((mkt, msg))
+        time.sleep(PAUSE)
+    return rows_out
+
+
 def main():
     args = sys.argv[1:]
+    if "--early-probe" in args:
+        early_probe(args[args.index("--early-probe") + 1])
+        return
     if "--test" in args:
         for mkt in ("sii", "otc"):
             data, body, gen, started, got = fetch_one(mkt, 2021, 1)

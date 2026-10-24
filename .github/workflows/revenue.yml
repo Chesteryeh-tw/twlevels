@@ -12,7 +12,7 @@ on:
       mode:
         description: "先選 test（1 分鐘），通過再選 full"
         type: choice
-        options: [test, full]
+        options: [test, full, early]
         default: test
 
 permissions:
@@ -39,6 +39,27 @@ jobs:
       - name: 測試（只抓 2021-01 上市、上櫃各一份，不寫檔）
         if: env.MODE == 'test'
         run: python revenue_fetch.py --test
+
+      # SUS 事先登記 v2.3 第 7 節：早年營收先抓 2017-12 上市、上櫃 2 份，只看格式與列數（不碰 manifest、不建 panel）
+      - name: 還原已抓的月營收（early）
+        if: env.MODE == 'early'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+
+      - name: 早年試抓 2017-12（2 份）
+        if: env.MODE == 'early'
+        run: python revenue_fetch.py --early-probe 201712
+
+      - name: 存進快取（early）
+        if: always() && env.MODE == 'early'
+        uses: actions/cache/save@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-${{ github.run_id }}
 
       - name: 還原已抓的月營收
         if: env.MODE == 'full'
