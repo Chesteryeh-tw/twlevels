@@ -506,6 +506,35 @@ def record_version(man, key, mkt, ym, data, body, gen, started, got):
     return True
 
 
+SNAP = os.path.join(RAW, "snapshots")
+
+
+def save_snapshot(ym):
+    """SUS 事先登記 v2.4 第 2、9 節「共同營收快照」：營收月 ym 第一次成功發布 panel 時，把當下整張 panel 原樣存成不可變快照，
+    記下 cutoff_at（這一刻的 UTC 時間）與雜湊。已存在就不動（之後的更正不回填）。11 日版與 16 日版都只用這一份。"""
+    d = os.path.join(SNAP, ym)
+    if os.path.exists(os.path.join(d, "meta.json")):
+        return False
+    try:
+        import revenue_panel
+        pp, _mp, _ = revenue_panel.resolve(OUT)
+    except SystemExit as e:
+        print("快照：panel 不一致（%s），不存" % e)
+        return False
+    if not pp:
+        return False
+    data = open(pp, "rb").read()
+    sha = hashlib.sha256(data).hexdigest()
+    save_atomic(os.path.join(d, "panel.csv"), data)
+    if hashlib.sha256(open(os.path.join(d, "panel.csv"), "rb").read()).hexdigest() != sha:
+        print("快照：重讀雜湊對不上，不寫 meta")
+        return False
+    meta = dict(revenue_month=ym, cutoff_at=utc_now(), panel_sha256=sha, source=os.path.relpath(pp, OUT), pit_verified=True)
+    save_atomic(os.path.join(d, "meta.json"), json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+    print("快照：營收月 %s 存好（cutoff_at %s，sha %s）" % (ym, meta["cutoff_at"], sha[:12]))
+    return True
+
+
 def early_probe(ym):
     """SUS 事先登記 v2.3 第 7 節：補抓早年營收前，先抓指定月份上市、上櫃各 1 份，只看格式、列數、重複代號，
     不碰 manifest、不建 panel、不看績效。原始檔存 data/revenue_raw/early/（不進 repo）。被擋就停。"""
@@ -624,6 +653,8 @@ def main():
         sys.exit(3)
     save_manifest(man)
     published = build_panel(man)
+    if published and not failed and not blocked and not AUDIT_FAILED:
+        save_snapshot("%d%02d" % months[-1])     # 這一輪的目標月份全數驗過才存快照
     ok = sum(1 for v in man.values() if v.get("ok"))
     print("完成：%d／%d 份合格" % (ok, len(months) * 2))
     if failed:

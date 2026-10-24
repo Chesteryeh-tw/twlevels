@@ -491,5 +491,22 @@ def h403(*a):
 rf.download = h403
 check("E3 早年試抓 403 → exit 2（停）", run_main(["--early-probe", "201712"]) == 2)
 
+# ---- 共同營收快照（SUS v2.4 第 2、9 節）----
+fresh(((2021, 1), (2021, 2)))
+run_main()
+sd = os.path.join(rf.SNAP, "202102")
+meta = json.load(open(os.path.join(sd, "meta.json"), encoding="utf-8"))
+check("K1 全數驗過 → 存目標月快照，雜湊＝當下 panel", meta["revenue_month"] == "202102" and
+      meta["panel_sha256"] == hashlib.sha256(open(PANEL(), "rb").read()).hexdigest() and meta["cutoff_at"], meta)
+first = open(os.path.join(sd, "panel.csv"), "rb").read()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
+run_main()
+check("K2 之後的更正不回填快照（已存在就不動）", open(os.path.join(sd, "panel.csv"), "rb").read() == first and
+      json.load(open(os.path.join(sd, "meta.json"), encoding="utf-8")) == meta)
+fresh(((2021, 1), (2021, 2)))
+rf.download = lambda mkt, y, m: (_ for _ in ()).throw(rf.Blocked("x")) if (y, m) == (2021, 2) else make_csv(mkt, y, m)
+run_main()
+check("K3 目標月沒抓齊（被擋）→ 不存快照", not os.path.exists(os.path.join(rf.SNAP, "202102")))
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)
