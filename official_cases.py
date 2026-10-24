@@ -220,13 +220,27 @@ def write(snaps, daily, cal):
         exp = before[-need:] + [sig] + after[:1]
         have = {r[2] for r in by.get(code, []) if r[6] is not None and (r[7] or 0) > 0}
         miss = [d for d in exp if d not in have]
+        # GPT P5：次一個市場開市日必須在已驗證的日曆裡，且當天要有有效開盤；日曆本身每個月都要有資料
+        cal_months = {d[:6] for d in cal_s}
+        span, (yy, mm) = [], (int(exp[0][:4]), int(exp[0][4:6]))
+        while "%d%02d" % (yy, mm) <= exp[-1][:6]:
+            span.append("%d%02d" % (yy, mm))
+            yy, mm = (yy + 1, 1) if mm == 12 else (yy, mm + 1)
+        reasons = []
+        if not after:
+            reasons.append("next_market_day_unverified")
+        elif not any(r[2] == after[0] and r[3] is not None for r in by.get(code, [])):
+            reasons.append("next_open_missing")
+        if any(ym not in cal_months for ym in span):
+            reasons.append("calendar_month_missing")
+        rec["coverage_reason"] = " ".join(reasons)
         rec["expected_window_start"] = exp[0] if len(before) >= need else ""
         rec["expected_dates"] = len(exp)
         rec["observed_window_start"] = min((d for d in exp if d in have), default="")
         rec["missing_dates"] = len(miss) if len(before) >= need else "calendar_too_short"
         rec["missing_months"] = " ".join(sorted({d[:6] for d in miss}))
         rec["failed_requests"] = " ".join(fail_months.get(code, []))
-        complete = len(before) >= need and not miss
+        complete = len(before) >= need and not miss and not reasons
         rec["coverage_status"] = "complete" if complete else "incomplete"
         if not complete:
             for k in ("yl_pct", "window_first_date", "R", "touched", "not_above", "bull", "cross_today", "below_yesterday"):
@@ -241,7 +255,7 @@ def write(snaps, daily, cal):
             rec["eligibility"] = "pass" if ok else "fail"
         rec["compare_to_original_value"] = "待 GPT 用 rally_events.csv 比對"
     keys += ["expected_window_start", "observed_window_start", "expected_dates", "missing_dates", "missing_months",
-             "failed_requests", "coverage_status", "eligibility", "compare_to_original_value"]
+             "failed_requests", "coverage_status", "coverage_reason", "eligibility", "compare_to_original_value"]
     keys += sorted({k for r in out for k in r if k.startswith("observed_") and k not in keys})
     w("feature_check.csv", keys, [[r.get(k, "") for k in keys] for r in out])
     for rec in out:       # 寫成 Actions 註記，不用下載檔也看得到

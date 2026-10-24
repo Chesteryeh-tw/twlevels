@@ -76,5 +76,22 @@ oc.write(snaps, daily, set(cal))
 r = next(csv.DictReader(open("feature_check.csv", encoding="utf-8")))
 check("O2b 窗口完整 → complete，給出年線與判定", r["coverage_status"] == "complete" and r["yl_pct"] != "" and r["eligibility"] in ("pass", "fail"), r)
 
+# P5 日曆只到訊號日 → 次一市場日沒驗證，不能宣告完整
+daily5 = [r for r in daily if r[2] <= sig]
+oc.write(snaps, daily5, set(d for d in cal if d <= sig))
+r = next(csv.DictReader(open("feature_check.csv", encoding="utf-8")))
+check("P5 日曆沒有次一市場日 → incomplete、unresolved、原因 next_market_day_unverified",
+      r["coverage_status"] == "incomplete" and r["eligibility"] == "unresolved" and "next_market_day_unverified" in r["coverage_reason"], r)
+# P5b 日曆有次日、但該股次日沒有開盤價 → incomplete
+daily5b = [r for r in daily if r[2] != cal[261]]
+oc.write(snaps, daily5b, set(cal))
+r = next(csv.DictReader(open("feature_check.csv", encoding="utf-8")))
+check("P5b 次日無有效開盤 → incomplete（next_open_missing）", r["coverage_status"] == "incomplete" and "next_open_missing" in r["coverage_reason"], r)
+# P5c 日曆少一整個月 → incomplete（calendar_month_missing）
+cal_hole = set(d for d in cal if not d.startswith("202406"))
+oc.write(snaps, daily, cal_hole)
+r = next(csv.DictReader(open("feature_check.csv", encoding="utf-8")))
+check("P5c 日曆缺整個月 → incomplete（calendar_month_missing）", r["coverage_status"] == "incomplete" and "calendar_month_missing" in r["coverage_reason"], r)
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

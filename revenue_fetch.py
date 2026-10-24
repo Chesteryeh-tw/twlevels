@@ -140,6 +140,14 @@ def fetch_one(mkt, y, m):
             log_attempt(mkt, y, m, started, "blocked", error=str(e))
             raise
         except urllib.error.HTTPError as e:
+            try:
+                ebody = (e.read() or b"")[:2000].lower()
+            except Exception:
+                ebody = b""
+            if b"<html" in ebody or b"<!doctype" in ebody or b"captcha" in ebody:     # 錯誤狀態碼配驗證頁：第一次就停（GPT P2）
+                msg = "HTTP %d 且內容是網頁（可能是驗證頁），整批停止" % e.code
+                log_attempt(mkt, y, m, started, "blocked", error=msg)
+                raise Blocked(msg)
             log_attempt(mkt, y, m, started, "http_%d" % e.code)
             if e.code in STOP_HTTP:
                 raise Blocked("HTTP %d（對方拒絕或限流），整批停止" % e.code)
@@ -201,6 +209,9 @@ def save_atomic(path, data):
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
+
+
+REAL_SAVE_ATOMIC = save_atomic       # 還原舊檔時用，不受測試對 save_atomic 的替換影響
 
 
 def raw_path(mkt, ym, info):
@@ -279,9 +290,39 @@ def check_inputs(man):
     return good, problems
 
 
+PLAN = os.path.join(RAW, "plan.json")
+PLANS = os.path.join(RAW, "plans.jsonl")
+
+
+def write_plan(months):
+    """第一個請求之前先把「這一輪要求到哪個月」存起來（GPT P1）。plan.json 是最新一份，plans.jsonl 逐輪追加。
+    之後的覆蓋檢查用這個終點，不從「已經嘗試過的鍵」倒推。"""
+    rec = dict(planned_start="%d%02d" % months[0], planned_end="%d%02d" % months[-1],
+               planned_keys=["%s_%d%02d" % (mkt, y, m) for (y, m) in months for mkt in ("sii", "otc")],
+               planned_at=utc_now())
+    try:
+        save_atomic(PLAN, json.dumps(rec, ensure_ascii=False).encode("utf-8"))
+        with open(PLANS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError as e:
+        AUDIT_FAILED.append("plan：%s" % e)
+    return rec
+
+
+def load_plan():
+    try:
+        return json.load(open(PLAN, encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def requested_end(man):
-    """要求的最後月份＝帳本裡出現過的最大月份（不論成功或失敗；抓過、試過、被擋都會留鍵）。"""
+    """要求的最後月份＝最近一輪計畫的終點（第一個請求前就存好）；沒有計畫檔（舊快取）才退回帳本裡最大的月份。
+    兩者取較晚的，帳本裡出現過更晚的月份也算要求過。"""
     yms = [k.split("_")[1] for k in man if "_" in k]
+    plan = load_plan()
+    if plan and plan.get("planned_end"):
+        yms.append(plan["planned_end"])
     return max(yms) if yms else None
 
 
@@ -324,19 +365,51 @@ def build_panel(man):
         for r in body:
             out.append([mkt, r[2].strip(), ym, num(r[5]), num(r[6]), num(r[7]), num(r[9]), num(r[8]),
                         r[0].strip(), info["sha256"], info.get("captured_at", ""), "false"])
-    os.makedirs(OUT, exist_ok=True)
-    tmp = panel + ".tmp"
-    with open(tmp, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["market", "code", "ym", "rev", "rev_prev", "rev_ly", "yoy_src", "mom_src", "generated",
-                    "raw_sha256", "captured_at", "pit_verified"])
-        w.writerows([["" if x is None else x for x in r] for r in out])
-    os.replace(tmp, panel)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["market", "code", "ym", "rev", "rev_prev", "rev_ly", "yoy_src", "mom_src", "generated",
+                "raw_sha256", "captured_at", "pit_verified"])
+    w.writerows([["" if x is None else x for x in r] for r in out])
+    panel_bytes = buf.getvalue().encode("utf-8")
+    psha = hashlib.sha256(panel_bytes).hexdigest()
     observed = max(k.split("_")[1] for k, _ in good)
-    meta = dict(requested_start="%d%02d" % START, requested_end=end, observed_end=observed,
-                months_verified=len(good), rows=len(out), missing_keys=[], published_at=utc_now(), pit_verified=False)
-    save_atomic(os.path.join(OUT, "panel_meta.json"), json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
-    print("panel.csv：%d 列（%d 個市場月份，%s～%s 全數驗過）" % (len(out), len(good), meta["requested_start"], end))
+    plan = load_plan() or {}
+    gen_id = "%s-%s" % (utc_now().replace(":", "").replace("-", ""), psha[:12])
+    meta = dict(generation=gen_id, panel_sha256=psha, requested_start="%d%02d" % START, requested_end=end,
+                planned_end=plan.get("planned_end"), observed_end=observed, months_verified=len(good), rows=len(out),
+                missing_keys=[], published_at=utc_now(), pit_verified=False)
+    meta_bytes = json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8")
+    gdir = os.path.join(OUT, "gen", gen_id)
+    meta_path = os.path.join(OUT, "panel_meta.json")
+    old = {p: (open(p, "rb").read() if os.path.exists(p) else None) for p in (panel, meta_path)}
+    try:
+        # 1) 先在不可變的 generation 資料夾寫兩個檔，重讀驗雜湊；任何一步失敗都不碰正在用的檔
+        save_atomic(os.path.join(gdir, "panel.csv"), panel_bytes)
+        save_atomic(os.path.join(gdir, "panel_meta.json"), meta_bytes)
+        if hashlib.sha256(open(os.path.join(gdir, "panel.csv"), "rb").read()).hexdigest() != psha or \
+                json.load(open(os.path.join(gdir, "panel_meta.json"), encoding="utf-8")).get("panel_sha256") != psha:
+            raise OSError("generation 重讀對不上")
+        # 2) 發布：先 panel、後 meta；第二個失敗就把第一個還原
+        try:
+            save_atomic(panel, panel_bytes)
+            save_atomic(meta_path, meta_bytes)
+        except OSError:
+            for p, data in old.items():
+                if data is None:
+                    if os.path.exists(p):
+                        os.remove(p)
+                else:
+                    REAL_SAVE_ATOMIC(p, data)
+            raise
+    except OSError as e:
+        print("panel 發布失敗（%s），保留上一份 panel 與 panel_meta" % e)
+        return False
+    gens = sorted(os.listdir(os.path.join(OUT, "gen")))
+    for g in gens[:-3]:          # 只留最近 3 個 generation
+        for fn in os.listdir(os.path.join(OUT, "gen", g)):
+            os.remove(os.path.join(OUT, "gen", g, fn))
+        os.rmdir(os.path.join(OUT, "gen", g))
+    print("panel.csv：%d 列（%d 個市場月份，%s～%s 全數驗過；generation %s）" % (len(out), len(good), meta["requested_start"], end, gen_id))
     return True
 
 
@@ -396,6 +469,9 @@ def main():
             for r in body[:3]:
                 print("   ", r[2], r[3], "當月", r[5], "去年當月", r[7], "年增%", r[9][:6])
             time.sleep(PAUSE)
+        if AUDIT_FAILED:
+            print("請求紀錄寫入失敗 %d 次，證據不完整，測試不算通過" % len(AUDIT_FAILED))
+            sys.exit(5)
         print("測試通過（沒有寫行情原始檔或 panel；請求紀錄會寫進 attempts.jsonl）")
         return
     try:
@@ -408,6 +484,7 @@ def main():
             sys.exit(4)
         return
     months = months_to_fetch()
+    write_plan(months)                  # 第一個請求之前先存這一輪的目標範圍（GPT P1）
     recent = set(months[-3:])           # 最近 3 個月可能還有更正，每次都重抓
     failed, blocked = [], None
     try:

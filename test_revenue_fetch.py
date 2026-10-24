@@ -318,5 +318,96 @@ run_main()
 check("15 之後抓失敗：ok 與雜湊保留、attempts 有記錄", man()["sii_202101"]["ok"] and man()["sii_202101"]["sha256"] == before
       and any('"retryable"' in l for l in open(rf.ATTEMPTS, encoding="utf-8")))
 
+# ---- GPT 2026-10-24 複核 P1～P4 ----
+# P1 目標範圍在第一個請求前就存好：已有 202101 快取，要求到 202103，第一份重抓被擋 → panel_meta／plan 的終點是 202103
+fresh(((2021, 1),))
+run_main()
+meta_before = json.load(open(os.path.join(rf.OUT, "panel_meta.json"), encoding="utf-8"))
+panel_before = open(PANEL(), "rb").read()
+rf.months_to_fetch = lambda today=None: [(2021, 1), (2021, 2), (2021, 3)]
+rf.download = lambda *a: (_ for _ in ()).throw(rf.Blocked("synthetic block"))
+code = run_main()
+plan = json.load(open(rf.PLAN, encoding="utf-8"))
+check("P1 被擋時 plan 已記 planned_end=202103、exit 2", code == 2 and plan["planned_end"] == "202103" and len(plan["planned_keys"]) == 6, (code, plan))
+check("P1b 沒發布新 panel（舊 panel 與 meta 不變）", open(PANEL(), "rb").read() == panel_before and
+      json.load(open(os.path.join(rf.OUT, "panel_meta.json"), encoding="utf-8")) == meta_before)
+check("P1c --panel-only 沿用最近一輪計畫的終點，也不發布", run_main(["--panel-only"]) == 4 and open(PANEL(), "rb").read() == panel_before)
+check("P1d plans.jsonl 逐輪追加", sum(1 for _ in open(rf.PLANS, encoding="utf-8")) == 2)
+
+# P2 503 配驗證頁：第一次就停（Blocked），不重試
+fresh()
+calls = []
+def html503(*a):
+    calls.append(1)
+    raise urllib.error.HTTPError(rf.URL, 503, "x", {}, io.BytesIO(b"<html>captcha</html>"))
+rf.download = html503
+try:
+    rf.fetch_one("sii", 2021, 1)
+    check("P2 503＋驗證頁 → Blocked", False, "沒有丟例外")
+except rf.Blocked:
+    check("P2 503＋驗證頁 → 只呼叫 1 次就 Blocked", len(calls) == 1, len(calls))
+# P2b 503 非網頁仍照舊重試 4 次
+fresh()
+calls = []
+def plain503(*a):
+    calls.append(1)
+    raise urllib.error.HTTPError(rf.URL, 503, "x", {}, io.BytesIO(b"service unavailable"))
+rf.download = plain503
+try:
+    rf.fetch_one("sii", 2021, 1)
+except rf.Bad:
+    pass
+check("P2b 503（非網頁）仍重試 4 次", len(calls) == 4, len(calls))
+
+# P3 --test 時請求紀錄寫不進去 → 非 0
+fresh()
+rf.ATTEMPTS = os.path.join(rf.RAW, "as_directory")
+os.makedirs(rf.ATTEMPTS, exist_ok=True)
+rf.AUDIT_FAILED.clear()
+code = run_main(["--test"])
+check("P3 --test 請求紀錄寫入失敗 → exit 5（不顯示通過）", code == 5 and rf.AUDIT_FAILED, code)
+rf.ATTEMPTS = os.path.join(rf.RAW, "attempts.jsonl")
+rf.AUDIT_FAILED.clear()
+
+# P4 panel_meta 寫入失敗 → panel.csv 與 meta 都維持上一份（同一 generation 才發布）
+fresh()
+run_main()
+panel_before = open(PANEL(), "rb").read()
+meta_path = os.path.join(rf.OUT, "panel_meta.json")
+meta_before_bytes = open(meta_path, "rb").read()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
+def bad_meta(path, data):
+    if str(path).endswith("panel_meta.json"):
+        raise OSError("synthetic meta failure")
+    return REAL_SAVE(path, data)
+rf.save_atomic = bad_meta
+code = run_main()
+rf.save_atomic = REAL_SAVE
+check("P4 meta 寫入失敗 → panel.csv 不變、meta 不變、exit 4", open(PANEL(), "rb").read() == panel_before and open(meta_path, "rb").read() == meta_before_bytes and code == 4, code)
+# P4b 正常發布：meta 的 panel_sha256 等於 panel.csv，generation 資料夾兩個檔都在
+run_main()
+meta = json.load(open(meta_path, encoding="utf-8"))
+gdir = os.path.join(rf.OUT, "gen", meta["generation"])
+check("P4b meta.panel_sha256＝panel.csv 雜湊；generation 資料夾有兩個檔",
+      meta["panel_sha256"] == hashlib.sha256(open(PANEL(), "rb").read()).hexdigest() and
+      sorted(os.listdir(gdir)) == ["panel.csv", "panel_meta.json"], meta)
+# P4c 第二個檔（meta）發布失敗而 panel 已換 → 還原：模擬只在「發布」那次寫 meta 時失敗（generation 內的 meta 寫成功）
+fresh()
+run_main()
+panel_before = open(PANEL(), "rb").read()
+meta_before_bytes = open(meta_path, "rb").read()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
+state = {"n": 0}
+def bad_second(path, data):
+    if str(path).endswith("panel_meta.json"):
+        state["n"] += 1
+        if state["n"] == 2:          # 第 1 次是 generation 內的 meta，第 2 次才是正式發布
+            raise OSError("synthetic publish failure")
+    return REAL_SAVE(path, data)
+rf.save_atomic = bad_second
+code = run_main()
+rf.save_atomic = REAL_SAVE
+check("P4c 發布 meta 失敗 → panel.csv 還原成上一份", open(PANEL(), "rb").read() == panel_before and open(meta_path, "rb").read() == meta_before_bytes and code == 4, code)
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

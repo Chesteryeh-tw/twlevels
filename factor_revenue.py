@@ -40,7 +40,21 @@ def load_prices():
     return px
 
 
+def check_panel_meta():
+    """panel_meta.json 記了 panel.csv 的雜湊；兩者對不上（只發布到一半）就不跑，免得用到新舊混合的資料。"""
+    mp = os.path.join(os.path.dirname(PANEL), "panel_meta.json")
+    if not os.path.exists(mp):
+        print("沒有 panel_meta.json（舊版快取產生的 panel），略過一致性檢查")
+        return
+    import hashlib
+    meta = json.load(open(mp, encoding="utf-8"))
+    sha = hashlib.sha256(open(PANEL, "rb").read()).hexdigest()
+    if meta.get("panel_sha256") and meta["panel_sha256"] != sha:
+        raise SystemExit("panel.csv 跟 panel_meta.json 的雜湊對不上（%s ≠ %s），不執行" % (sha[:12], str(meta["panel_sha256"])[:12]))
+
+
 def load_panel():
+    check_panel_meta()
     rev = defaultdict(dict)     # code -> ym -> (rev, rev_ly)
     for r in csv.DictReader(open(PANEL, encoding="utf-8")):
         try:
