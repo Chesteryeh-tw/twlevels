@@ -188,6 +188,7 @@ def write_stock(code, f_open, f_close, wan):
 write_stock("2330", lambda i: 100 + i, lambda i: 100 + i, 50000)       # 每天 +1
 write_stock("4958", lambda i: 100, lambda i: 100, 50000)               # 不動
 write_stock("1101", lambda i: 100, lambda i: 100, 5000)                # 成交金額不到 1 億，不進基準
+write_stock("2603", lambda i: 100 if i < 3 else 30, lambda i: 100 if i < 3 else 30, 50000)   # 第 3 天面額變更：不能進基準
 rc = ws.main()
 ev = list(csv.DictReader(open("warrant_h5_events.csv", encoding="utf-8")))
 e = [x for x in ev if x["group"] == "C_top20" and x["T"] == "20241001" and x["code"] == "2330"][0]
@@ -196,6 +197,9 @@ check("H1 台積電第 1 名、5 日報酬與超額正確", e["rank"] == "1" and
 check("H2 跳空＝T+1 開 ÷ T 收", abs(float(e["gap"]) - 1.0) < 1e-6, e["gap"])
 check("H3 成交金額 < 1 億的不進候選與基準", not any(x["code"] == "1101" for x in ev))
 check("H4 認售前 20 有台積電（淨買 > 0）", any(x["group"] == "P_top20" and x["code"] == "2330" for x in ev))
+eb = [x for x in ev if x["group"] == "C_top20" and x["T"] == "20241001" and x["code"] == "2330"][0]
+check("H6 持有期間有公司行動的股票不進基準（超額不受 −70%% 影響）", abs(float(eb["x5"]) - 1.9802) < 1e-3, eb["x5"])
+check("H7 同規模超額有算", eb.get("m5", "") != "", eb)
 check("H5 報告產生", os.path.exists("warrant_study_report.md") and "主要格判定" in open("warrant_study_report.md", encoding="utf-8").read())
 
 wf.dt.datetime = real_now
