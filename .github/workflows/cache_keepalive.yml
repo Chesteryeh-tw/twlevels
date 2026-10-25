@@ -51,10 +51,18 @@ jobs:
           restore-keys: |
             corp-raw-
 
+      - name: 讀市場日曆原始檔快取
+        uses: actions/cache/restore@v4
+        with:
+          path: data/cal_raw
+          key: cal-raw-
+          restore-keys: |
+            cal-raw-
+
       - name: 摘要
         run: |
           echo "### 快取保溫" >> $GITHUB_STEP_SUMMARY
-          for d in data/stock data/chip_fm data/revenue_raw data/corp_raw; do
+          for d in data/stock data/chip_fm data/revenue_raw data/corp_raw data/cal_raw; do
             if [ -d "$d" ]; then
               echo "- $d：$(du -sh $d | cut -f1)，$(find $d -type f | wc -l) 個檔" >> $GITHUB_STEP_SUMMARY
             else

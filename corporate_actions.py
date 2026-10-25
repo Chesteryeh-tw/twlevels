@@ -14,6 +14,7 @@ Claude 2026-10-25 實查（櫃買 exDailyQ、revivt、pvChgRslt，參數 startDa
 """
 import csv, datetime as dt, glob, gzip, hashlib, json, os, random, re, sys, time
 import urllib.error, urllib.request
+from collections import defaultdict
 
 RAW = os.path.join("data", "corp_raw")
 MAN = os.path.join(RAW, "manifest.json")
@@ -126,8 +127,12 @@ def parse(src, body, a8, b8):
             raise Bad("stat=%s" % j.get("stat"))
         if j.get("date") != "%s~%s" % (a8, b8):
             raise Bad("回應區間 %s ≠ %s~%s" % (j.get("date"), a8, b8))
+        if len(j["tables"]) != 1:
+            raise Bad("tables 有 %d 個" % len(j["tables"]))
         t = j["tables"][0]
-        return t["fields"], t["data"]
+        if t.get("totalCount") is not None and int(t["totalCount"]) != len(t["data"]):
+            raise Bad("totalCount %s ≠ 列數 %d" % (t["totalCount"], len(t["data"])))
+        return check_shape(t["fields"], t["data"])
     stat = str(j.get("stat", ""))
     if any(x in stat for x in NO_DATA):
         return [], []
@@ -137,7 +142,17 @@ def parse(src, body, a8, b8):
            j.get("endDate") or (j.get("params") or {}).get("endDate"))
     if got != (a8, b8):
         raise Bad("回應區間 %s ≠ %s~%s" % (got, a8, b8))
-    return j.get("fields", []), j.get("data", [])
+    return check_shape(j.get("fields", []), j.get("data", []))
+
+
+def check_shape(fields, rows):
+    """GPT 06 D：欄名不可重複、每列長度要等於欄數（不讓 zip 默默截斷）。"""
+    if len(set(fields)) != len(fields):
+        raise Bad("欄名重複")
+    short = [i for i, r in enumerate(rows) if len(r) != len(fields)]
+    if short:
+        raise Bad("%d 列長度跟欄數 %d 不同（第一個在第 %d 列）" % (len(short), len(fields), short[0]))
+    return fields, rows
 
 
 def fetch(today=None):
@@ -153,7 +168,7 @@ def fetch(today=None):
             if (time.time() - t0) / 60 > BUDGET_MIN:
                 print("::notice::公司行動：時間到，下次接著抓（停在 %s）" % key)
                 save_man(man)
-                return 0
+                return 3
             a, b, a8, b8 = window(y, m, fmt)
             time.sleep(random.uniform(4, 7))
             try:
@@ -179,54 +194,96 @@ def fetch(today=None):
     return 0
 
 
-def build():
+FIRST_SEEN = os.path.join("data", "corporate_actions_first_seen.json")
+COVERAGE = os.path.join("data", "corporate_actions_coverage.json")
+EX_TYPES = {"息": "ex_dividend", "除息": "ex_dividend", "權": "ex_right", "除權": "ex_right", "權息": "ex_right_dividend",
+            "除權息": "ex_right_dividend"}
+
+
+def build(today=None):
+    """先列出全部「來源 × 月份」預期鍵，逐一驗：帳本 ok、原始檔存在、雜湊相符、欄位與列日期正確。
+    - 七個來源都驗過的月份才算「涵蓋」（寫進 coverage）；缺抓、驗不過的月份列出來，SUS 前瞻遇到就當未解。
+    - 有任何解析錯誤（bad）→ 不覆寫正式表，保留上一份合格版本，回非 0。
+    - first_seen_at：每個事件第一次出現在我們抓到的官方表的時間（抓取時間，UTC），存在 repo 的登錄檔，只增不改。"""
     man = load_man()
-    out, bad = [], []
+    out, bad, missing, ok_months = [], [], [], defaultdict(set)
+    seen = json.load(open(FIRST_SEEN, encoding="utf-8")) if os.path.exists(FIRST_SEEN) else {}
+    exp = ["%d%02d" % ym for ym in months(today)]
     for src, mkt, url, fmt, code_f, date_f, kind in SOURCES:
-        for p in sorted(glob.glob(os.path.join(RAW, src, "*.json.gz"))):
-            ym = os.path.basename(p)[:6]
-            info = man.get("%s_%s" % (src, ym), {})
+        for ym in exp:
+            key = "%s_%s" % (src, ym)
+            info = man.get(key, {})
+            p = os.path.join(RAW, src, ym + ".json.gz")
+            if not info.get("ok") or not os.path.exists(p):
+                missing.append(key)
+                continue
             body = gzip.open(p).read()
-            if not info.get("ok") or hashlib.sha256(body).hexdigest() != info.get("sha256"):
-                bad.append("%s_%s 雜湊或帳本對不上" % (src, ym))
+            if hashlib.sha256(body).hexdigest() != info.get("sha256"):
+                bad.append("%s 雜湊跟帳本對不上" % key)
                 continue
             y, m = int(ym[:4]), int(ym[4:])
             _a, _b, a8, b8 = window(y, m, fmt)
-            fields, rows = parse(src, body, a8, b8)
-            if rows and (code_f not in fields or date_f not in fields):
-                bad.append("%s_%s 欄位缺 %s／%s" % (src, ym, code_f, date_f))
+            try:
+                fields, rows = parse(src, body, a8, b8)
+            except (Bad, Stop, ValueError) as e:
+                bad.append("%s 解析失敗：%s" % (key, e))
                 continue
+            if rows and (code_f not in fields or date_f not in fields):
+                bad.append("%s 欄位缺 %s／%s" % (key, code_f, date_f))
+                continue
+            row_bad = False
             for r in rows:
                 d = dict(zip(fields, [str(x).strip() for x in r]))
                 eff = roc_date(d[date_f])
                 if not eff or not (a8 <= eff <= b8):
-                    bad.append("%s_%s 日期 %s 不在區間" % (src, ym, d[date_f]))
+                    bad.append("%s 日期 %s 不在區間" % (key, d[date_f]))
+                    row_bad = True
                     continue
                 typ, cash = kind, 0
                 if kind == "ex":
                     v = d.get("權/息", "")
-                    typ = {"息": "ex_dividend", "除息": "ex_dividend", "權": "ex_right", "除權": "ex_right"}.get(v, "ex_right_dividend")
+                    if v not in EX_TYPES:
+                        bad.append("%s 權/息 值認不得：%r（%s）" % (key, v, d[code_f]))
+                        row_bad = True
+                        continue
+                    typ = EX_TYPES[v]
                     cash = 1 if typ == "ex_dividend" else 0
                 elif kind == "etf_split":
                     typ = "etf_reverse_split" if "反" in d.get("分割(反分割)", "") else "etf_split"
                 prev = next((d[k] for k in fields if "前收盤" in k or "最後交易日之收盤" in k or "停止買賣前收盤" in k), "")
                 ref = next((d[k] for k in fields if "參考價" in k and "減除股利" not in k and "除權參考價" != k), "")
-                out.append(dict(code=d[code_f], effective_date=eff, type=typ, announce_at="", cash_only=cash, market=mkt,
-                                source=src, prev_close=prev, ref_price=ref, reason=d.get("減資原因", ""),
-                                raw_sha256=info["sha256"], source_row=json.dumps(d, ensure_ascii=False)))
+                ev = "%s|%s|%s" % (src, d[code_f], eff)
+                seen.setdefault(ev, info.get("at", ""))
+                out.append(dict(event_id=ev, code=d[code_f], effective_date=eff, type=typ, announce_at="",
+                                first_seen_at=seen[ev], cash_only=cash, market=mkt, source=src, prev_close=prev,
+                                ref_price=ref, reason=d.get("減資原因", ""), raw_sha256=info["sha256"],
+                                source_row=json.dumps(d, ensure_ascii=False)))
+            if not row_bad:
+                ok_months[ym].add(src)
+    covered = sorted(ym for ym in exp if len(ok_months[ym]) == len(SOURCES))
+    cov = dict(months=covered, missing=missing, bad=bad[:200], sources=[s_[0] for s_ in SOURCES],
+               note="first_seen_at 是抓到官方結果表的時間；結果表多在生效日當天或之後才有，前瞻用不到事前已知（需另抓預告表）。")
+    print("::notice::公司行動表：%d 筆；涵蓋 %d／%d 個月；缺 %d 個來源月；問題 %d 個" % (
+        len(out), len(covered), len(exp), len(missing), len(bad)))
+    for x in bad[:20]:
+        print("  " + x)
+    if bad:
+        print("::error::公司行動表有 %d 個問題，不覆寫正式表（保留上一份合格版本）" % len(bad))
+        json.dump(cov, open(COVERAGE + ".failed.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        return out, bad
     out.sort(key=lambda r: (r["effective_date"], r["code"], r["source"]))
-    cols = ["code", "effective_date", "type", "announce_at", "cash_only", "market", "source", "prev_close", "ref_price",
-            "reason", "raw_sha256", "source_row"]
+    cols = ["event_id", "code", "effective_date", "type", "announce_at", "first_seen_at", "cash_only", "market", "source",
+            "prev_close", "ref_price", "reason", "raw_sha256", "source_row"]
     tmp = OUT + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(out)
+    for pth, obj in ((FIRST_SEEN, seen), (COVERAGE, cov)):
+        t2 = pth + ".tmp"
+        json.dump(obj, open(t2, "w", encoding="utf-8"), ensure_ascii=False, indent=0, sort_keys=True)
+        os.replace(t2, pth)
     os.replace(tmp, OUT)
-    print("::notice::公司行動表：%d 筆（%s）；問題 %d 個" % (len(out), ", ".join(
-        "%s %d" % (s[0], sum(1 for r in out if r["source"] == s[0])) for s in SOURCES), len(bad)))
-    for x in bad[:20]:
-        print("  " + x)
     return out, bad
 
 
@@ -284,6 +341,7 @@ if __name__ == "__main__":
     code = 0
     if "--build" not in sys.argv:
         code = fetch()
-    rows, _bad = build()
-    match(rows, gaps())
-    sys.exit(code)
+    rows, bad = build()
+    if not bad:
+        match(rows, gaps())
+    sys.exit(code or (4 if bad else 0))

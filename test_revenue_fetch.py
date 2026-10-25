@@ -501,6 +501,7 @@ check("K1 全數驗過 → 存目標月快照，雜湊＝當下 panel", meta["re
 first = open(os.path.join(sd, "panel.csv"), "rb").read()
 rf.download = lambda mkt, y, m: make_csv(mkt, y, m, rev="2,000")
 run_main()
+check("K1b repo 持久 meta 與快照 meta 相同", json.load(open(os.path.join(rf.SNAP_META, "202102.json"), encoding="utf-8")) == meta)
 check("K2 之後的更正不回填快照（已存在就不動）", open(os.path.join(sd, "panel.csv"), "rb").read() == first and
       json.load(open(os.path.join(sd, "meta.json"), encoding="utf-8")) == meta)
 fresh(((2021, 1), (2021, 2)))

@@ -31,6 +31,23 @@ jobs:
           key: corp-raw-
           restore-keys: |
             corp-raw-
+      - name: 還原市場日曆原始檔
+        uses: actions/cache/restore@v4
+        with:
+          path: data/cal_raw
+          key: cal-raw-
+          restore-keys: |
+            cal-raw-
+      - name: 官方市場日曆（FMTQIK＋休市日表）
+        id: cal
+        continue-on-error: true
+        run: python market_calendar.py
+      - name: 存市場日曆快取
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/cal_raw
+          key: cal-raw-${{ github.run_id }}
       - name: 抓取、建表、比對價格斷點
         id: fetch
         continue-on-error: true
@@ -46,7 +63,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in data/corporate_actions.csv corporate_actions_match.md corporate_actions_gaps.csv; do [ -f "$f" ] && git add -f "$f"; done
+          for f in data/corporate_actions.csv corporate_actions_match.md corporate_actions_gaps.csv data/corporate_actions_coverage.json data/corporate_actions_first_seen.json data/market_calendar.json; do [ -f "$f" ] && git add -f "$f"; done
           if git diff --cached --quiet; then echo "沒有變動"; else
             git commit -m "公司行動事件表（官方總表）"
             git pull --rebase --autostash

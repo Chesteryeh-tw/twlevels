@@ -59,5 +59,47 @@ try:
     CA.get("http://x"); check("C8 轉址 → Stop", False)
 except CA.Stop:
     check("C8 轉址 → Stop", True)
+# C9 截短列 → Bad；totalCount 不符 → Bad
+j = json.load(open(os.path.join(HERE, "testdata", "corp", "revivt.json"), encoding="utf-8"))
+j["tables"][0]["data"][0] = j["tables"][0]["data"][0][:5]
+try:
+    CA.parse("revivt", json.dumps(j, ensure_ascii=False).encode(), "20251111", "20251111"); check("C9 截短列 → Bad", False)
+except CA.Bad:
+    check("C9 截短列 → Bad", True)
+j = json.load(open(os.path.join(HERE, "testdata", "corp", "revivt.json"), encoding="utf-8"))
+j["tables"][0]["totalCount"] = 5
+try:
+    CA.parse("revivt", json.dumps(j, ensure_ascii=False).encode(), "20251111", "20251111"); check("C10 totalCount 不符 → Bad", False)
+except CA.Bad:
+    check("C10 totalCount 不符 → Bad", True)
+# C11 未知 權/息 → bad、不覆寫正式表
+tmp2 = tempfile.mkdtemp(); os.chdir(tmp2); man = {}
+j = json.load(open(os.path.join(HERE, "testdata", "corp", "TWT49U.json"), encoding="utf-8"))
+j["strDate"], j["endDate"] = "20260901", "20260930"
+fi = j["fields"].index("權/息"); j["data"][0][fi] = "怪"
+put("TWT49U", "202609", json.dumps(j, ensure_ascii=False).encode()); CA.save_man(man)
+open(CA.OUT, "w").write("old\n")
+_r, b3 = CA.build()
+check("C11 未知權息值 → 列為問題、不覆寫正式表", b3 and open(CA.OUT).read() == "old\n", b3[:2])
+# C12 涵蓋：七個來源都驗過的月份才算
+tmp3 = tempfile.mkdtemp(); os.chdir(tmp3); man = {}
+empty_twse = json.dumps({"stat": "很抱歉，沒有符合條件的資料!"}).encode()
+for src in ("TWT49U", "TWTAUU", "TWTB8U", "TWTCAU"):
+    put(src, "202101", empty_twse)
+for src in ("exDailyQ", "revivt", "pvChgRslt"):
+    put(src, "202101", json.dumps({"stat": "ok", "date": "20210101~20210131", "tables": [{"fields": ["a"], "data": [], "totalCount": 0}]}).encode())
+for src in ("TWT49U", "TWTAUU", "TWTB8U", "TWTCAU", "exDailyQ", "revivt"):
+    put(src, "202102", empty_twse if src.startswith("TW") else json.dumps({"stat": "ok", "date": "20210201~20210228", "tables": [{"fields": ["a"], "data": [], "totalCount": 0}]}).encode())
+CA.save_man(man)
+CA.build()
+cov = json.load(open(CA.COVERAGE, encoding="utf-8"))
+check("C12 七個來源都齊的月份才算涵蓋（202102 缺 pvChgRslt）", "202101" in cov["months"] and "202102" not in cov["months"] and
+      "pvChgRslt_202102" in cov["missing"], cov["months"][:3])
+# C13 帳本 ok 但原始檔不見 → 算缺，不算涵蓋
+os.remove(os.path.join(CA.RAW, "TWTAUU", "202101.json.gz"))
+CA.build()
+cov = json.load(open(CA.COVERAGE, encoding="utf-8"))
+check("C13 帳本說 ok 但原始檔不見 → 缺、不涵蓋", "202101" not in cov["months"] and "TWTAUU_202101" in cov["missing"])
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

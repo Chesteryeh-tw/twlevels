@@ -507,6 +507,7 @@ def record_version(man, key, mkt, ym, data, body, gen, started, got):
 
 
 SNAP = os.path.join(RAW, "snapshots")
+SNAP_META = os.path.join("data", "revenue_snapshots_meta")
 
 
 def export_early():
@@ -556,7 +557,13 @@ def save_snapshot(ym):
         print("快照：重讀雜湊對不上，不寫 meta")
         return False
     meta = dict(revenue_month=ym, cutoff_at=utc_now(), panel_sha256=sha, source=os.path.relpath(pp, OUT), pit_verified=True)
-    save_atomic(os.path.join(d, "meta.json"), json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+    mb = json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8")
+    save_atomic(os.path.join(d, "meta.json"), mb)
+    # GPT 06 C：快取不是永久證據。meta（只有月份、cutoff、雜湊，沒有營收數字）另存一份進 repo；已存在就不動。
+    # 快取遺失時原始快照就是缺資料，不能重抓之後的版本冒充（雜湊對不上 sus_study 會拒收）。
+    pm = os.path.join(SNAP_META, "%s.json" % ym)
+    if not os.path.exists(pm):
+        save_atomic(pm, mb)
     print("快照：營收月 %s 存好（cutoff_at %s，sha %s）" % (ym, meta["cutoff_at"], sha[:12]))
     return True
 

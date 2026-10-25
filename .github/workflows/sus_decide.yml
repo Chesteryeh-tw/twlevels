@@ -1,0 +1,57 @@
+name: SUS 前瞻決策（每晚寫下當時的名單與時間）
+
+# SUS 事先登記 v2.4 第 2 節：前瞻月的 decision_at＝進場前一交易日價量、母體、計算都完成的時間（GPT 06 A1）。
+# 每晚 23:10（台北，update.yml 22:00 更新股價之後）跑一次：有該營收月的共同快照、而且下一個市場日符合 11 日版或 16 日版的
+# 名義下限時，用最新價量日當基準算分組，寫進 data/sus_decisions/<營收月>_v11.json／_v16.json（已存在就不改），commit 進 repo
+# 當作時間證據。沒有快照（還沒到 2026-11-11）時什麼都不寫。不下單、不碰任何帳戶。
+on:
+  schedule:
+    - cron: '10 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sus-decide
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 還原月營收快取（共同快照）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+      - name: 還原市場日曆原始檔
+        uses: actions/cache/restore@v4
+        with:
+          path: data/cal_raw
+          key: cal-raw-
+          restore-keys: |
+            cal-raw-
+      - name: 更新官方市場日曆（只重抓當月與休市日表）
+        continue-on-error: true
+        run: python market_calendar.py --refresh
+      - name: 寫決策紀錄
+        run: python sus_study.py --decide
+      - name: 推回決策紀錄
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          [ -d data/sus_decisions ] && git add -f data/sus_decisions
+          [ -f data/market_calendar.json ] && git add -f data/market_calendar.json
+          if git diff --cached --quiet; then echo "沒有新的決策紀錄"; else
+            git commit -m "SUS 前瞻決策紀錄"
+            git pull --rebase --autostash
+            git push
+          fi
