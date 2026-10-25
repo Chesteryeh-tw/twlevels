@@ -12,7 +12,7 @@ Claude 2026-10-25 實查（櫃買 exDailyQ、revivt、pvChgRslt，參數 startDa
 用法：python corporate_actions.py            抓＋建表＋比對價格斷點
       python corporate_actions.py --build    不抓，只用已存的原始檔建表與比對
 """
-import csv, datetime as dt, glob, gzip, hashlib, json, os, random, re, sys, time
+import csv, datetime as dt, glob, gzip, hashlib, io, json, os, random, re, sys, time
 import urllib.error, urllib.request
 from collections import defaultdict
 
@@ -204,10 +204,17 @@ def build(today=None):
     """先列出全部「來源 × 月份」預期鍵，逐一驗：帳本 ok、原始檔存在、雜湊相符、欄位與列日期正確。
     - 七個來源都驗過的月份才算「涵蓋」（寫進 coverage）；缺抓、驗不過的月份列出來，SUS 前瞻遇到就當未解。
     - 有任何解析錯誤（bad）→ 不覆寫正式表，保留上一份合格版本，回非 0。
-    - first_seen_at：每個事件第一次出現在我們抓到的官方表的時間（抓取時間，UTC），存在 repo 的登錄檔，只增不改。"""
+    - first_seen_at：每個事件「這一版內容」第一次出現在我們抓到的官方表的時間（抓取時間，UTC），存在 repo 的登錄檔，只增不改。
+      GPT 08 P2：繫結列內容雜湊；同一事件（來源|代號|生效日）內容被官方修訂 → 另記新版本的 first_seen，不沿用舊時間。
+      舊格式（只有時間、沒有雜湊）第一次重建時繫結當下內容（無法回溯舊內容，已知限制）。
+    - 發布（GPT 08 P5a）：先換事件表、再換 first_seen、最後換 coverage；coverage 記前兩者的雜湊，是唯一的發布點。
+      中途中斷時讀取端（sus_study.load_actions）會發現雜湊不符，整份當不可用，不會用到新舊混合的版本。
+    - coverage.verified（P5b）：每個「來源_月份」的抓取時間；前瞻用來證明事件表已核對到出場日之後。"""
     man = load_man()
     out, bad, missing, ok_months = [], [], [], defaultdict(set)
     seen = json.load(open(FIRST_SEEN, encoding="utf-8")) if os.path.exists(FIRST_SEEN) else {}
+    seen = {k: ([dict(row_sha256=None, first_seen_at=v)] if isinstance(v, str) else v) for k, v in seen.items()}
+    verified = {}
     exp = ["%d%02d" % ym for ym in months(today)]
     for src, mkt, url, fmt, code_f, date_f, kind in SOURCES:
         for ym in exp:
@@ -253,15 +260,25 @@ def build(today=None):
                 prev = next((d[k] for k in fields if "前收盤" in k or "最後交易日之收盤" in k or "停止買賣前收盤" in k), "")
                 ref = next((d[k] for k in fields if "參考價" in k and "減除股利" not in k and "除權參考價" != k), "")
                 ev = "%s|%s|%s" % (src, d[code_f], eff)
-                seen.setdefault(ev, info.get("at", ""))
+                rs = hashlib.sha256(json.dumps(d, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+                vers = seen.setdefault(ev, [])
+                hitv = next((x for x in vers if x.get("row_sha256") == rs), None)
+                if hitv is None and len(vers) == 1 and vers[0].get("row_sha256") is None:
+                    hitv = vers[0]
+                    hitv["row_sha256"] = rs              # 舊格式：繫結當下內容
+                if hitv is None:
+                    hitv = dict(row_sha256=rs, first_seen_at=info.get("at", ""))
+                    vers.append(hitv)
                 out.append(dict(event_id=ev, code=d[code_f], effective_date=eff, type=typ, announce_at="",
-                                first_seen_at=seen[ev], cash_only=cash, market=mkt, source=src, prev_close=prev,
+                                first_seen_at=hitv["first_seen_at"], cash_only=cash, market=mkt, source=src, prev_close=prev,
                                 ref_price=ref, reason=d.get("減資原因", ""), raw_sha256=info["sha256"],
                                 source_row=json.dumps(d, ensure_ascii=False)))
             if not row_bad:
                 ok_months[ym].add(src)
+                verified[key] = info.get("at", "")
     covered = sorted(ym for ym in exp if len(ok_months[ym]) == len(SOURCES))
     cov = dict(months=covered, missing=missing, bad=bad[:200], sources=[s_[0] for s_ in SOURCES],
+               verified=dict(sorted(verified.items())),
                note="first_seen_at 是抓到官方結果表的時間；結果表多在生效日當天或之後才有，前瞻用不到事前已知（需另抓預告表）。")
     print("::notice::公司行動表：%d 筆；涵蓋 %d／%d 個月；缺 %d 個來源月；問題 %d 個" % (
         len(out), len(covered), len(exp), len(missing), len(bad)))
@@ -274,16 +291,20 @@ def build(today=None):
     out.sort(key=lambda r: (r["effective_date"], r["code"], r["source"]))
     cols = ["event_id", "code", "effective_date", "type", "announce_at", "first_seen_at", "cash_only", "market", "source",
             "prev_close", "ref_price", "reason", "raw_sha256", "source_row"]
-    tmp = OUT + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        w.writerows(out)
-    for pth, obj in ((FIRST_SEEN, seen), (COVERAGE, cov)):
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, lineterminator="\r\n")
+    w.writeheader()
+    w.writerows(out)
+    csv_b = buf.getvalue().encode("utf-8")
+    seen_b = json.dumps(seen, ensure_ascii=False, indent=0, sort_keys=True).encode("utf-8")
+    cov.update(csv_sha256=hashlib.sha256(csv_b).hexdigest(), first_seen_sha256=hashlib.sha256(seen_b).hexdigest(),
+               generation=dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"))
+    cov_b = json.dumps(cov, ensure_ascii=False, indent=0, sort_keys=True).encode("utf-8")
+    for pth, b in ((OUT, csv_b), (FIRST_SEEN, seen_b), (COVERAGE, cov_b)):    # coverage 最後：發布點
         t2 = pth + ".tmp"
-        json.dump(obj, open(t2, "w", encoding="utf-8"), ensure_ascii=False, indent=0, sort_keys=True)
+        with open(t2, "wb") as f:
+            f.write(b)
         os.replace(t2, pth)
-    os.replace(tmp, OUT)
     return out, bad
 
 

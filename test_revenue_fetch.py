@@ -491,7 +491,10 @@ def h403(*a):
 rf.download = h403
 check("E3 早年試抓 403 → exit 2（停）", run_main(["--early-probe", "201712"]) == 2)
 
-# ---- 共同營收快照（SUS v2.4 第 2、9 節）----
+# ---- 共同營收快照（SUS v2.4 第 2、9 節；GPT 08 P3 正式時窗）----
+import datetime as _dt
+_TPE = _dt.timezone(_dt.timedelta(hours=8))
+rf.SNAP_CLOCK = lambda: _dt.datetime(2021, 3, 11, 20, 0, tzinfo=_TPE)
 fresh(((2021, 1), (2021, 2)))
 run_main()
 sd = os.path.join(rf.SNAP, "202102")
@@ -508,6 +511,17 @@ fresh(((2021, 1), (2021, 2)))
 rf.download = lambda mkt, y, m: (_ for _ in ()).throw(rf.Blocked("x")) if (y, m) == (2021, 2) else make_csv(mkt, y, m)
 run_main()
 check("K3 目標月沒抓齊（被擋）→ 不存快照", not os.path.exists(os.path.join(rf.SNAP, "202102")))
+check("K1c meta 有 formal、captured／cutoff、來源雜湊；snapshot_pit 與 history_pit_verified 分開",
+      meta.get("formal") is True and meta.get("captured_at") and meta.get("sources_sha256") and meta.get("snapshot_pit") is True
+      and meta.get("history_pit_verified") is False and "pit_verified" not in meta, meta)
+for when, name in (((2021, 3, 11, 19, 29), "K4a 11 日 19:29（早於 19:30）→ 不建正式快照"),
+                   ((2021, 3, 12, 9, 0), "K4b 12 日 09:00 以後 → 不建（不用晚到版本回填）"),
+                   ((2021, 3, 15, 12, 0), "K4c 15 日 → 不建")):
+    rf.SNAP_CLOCK = lambda w=when: _dt.datetime(*w, tzinfo=_TPE)
+    fresh(((2021, 1), (2021, 2)))
+    run_main()
+    check(name, not os.path.exists(os.path.join(rf.SNAP, "202102")))
+rf.SNAP_CLOCK = lambda: _dt.datetime(2021, 3, 11, 20, 0, tzinfo=_TPE)
 
 # ---- 早年清單匯出 ----
 fresh()

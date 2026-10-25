@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sus_study.py v2 的合成資料測試（不讀真資料）。照 SUS 事先登記 v2.4 與 GPT 06（A1～A4、B）檢查。"""
+"""sus_study.py v3 的合成資料測試（不讀真資料）。照 SUS 事先登記 v2.4 與 GPT 06（A1～A4、B）、08（P1～P6）檢查。"""
 import datetime as dt, json, math, os, random, statistics as st, sys, tempfile, hashlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sus_study as S
@@ -19,6 +19,10 @@ def weekdays(a, b):
     return out
 
 TPE = S.TPE
+FAR = S.parse_time("2099-01-01T00:00:00Z")
+def VER(months, srcs=("X",), at=FAR):
+    """前瞻覆蓋要有每個來源月的抓取時間（P5b）；測試預設抓取時間在很遠的未來＝已核對到出場日之後。"""
+    return dict(verified={"%s_%s" % (x, m): at for x in srcs for m in months}, sources=list(srcs), ok=True)
 # ---- T1 歷史進場日 ----
 days = weekdays((2025, 1, 1), (2025, 12, 31))
 check("T1a 11 日是交易日 → 11 日版 12 日", S.historical_entry("202501", 11, days)[2] == "20250212")
@@ -36,7 +40,7 @@ check("A3d 沒時區的 ISO → 不採用", S.parse_time("2026-11-17T10:00:00") 
 check("A3e 無效格式 → 不採用", S.parse_time("2026/11/17") is None and S.parse_time("20261340") is None and S.parse_time("") is None)
 dec = dt.datetime(2026, 11, 11, 23, 59, 59, tzinfo=TPE)
 acts = dict(by_code={"X": [dict(eff="20261120", known_at=S.parse_time("2026-11-17T10:00:00+08:00"), cash=False, type="t", id="a")]},
-            covered={"202611", "202612"})
+            covered={"202611", "202612"}, **VER(("202611", "202612")))
 check("A3f 17 日才公告、11 日決策 → unresolved（v1 用字串前 8 碼會誤判成已知）",
       S.classify_actions("X", "20261112", "20261210", dec, acts, False, False)[0] == "unresolved")
 acts["by_code"]["X"][0]["known_at"] = S.parse_time("20261111")
@@ -45,15 +49,17 @@ check("A3h 只知道 11 日公告、11 日 19:30 決策 → 不算已知（日�
       S.classify_actions("X", "20261112", "20261210", dt.datetime(2026, 11, 11, 19, 30, tzinfo=TPE), acts, False, False)[0] == "unresolved")
 
 # ---- A2 前瞻的公司行動 ----
-acts2 = dict(by_code={"X": [dict(eff="20261120", known_at=None, cash=False, type="t", id="a")]}, covered={"202611", "202612"})
+acts2 = dict(by_code={"X": [dict(eff="20261120", known_at=None, cash=False, type="t", id="a")]}, covered={"202611", "202612"},
+             **VER(("202611", "202612")))
 check("A2a 歷史：沒有時間 → announce_unknown", S.classify_actions("X", "20261112", "20261210", dec, acts2, False, False)[0] == "announce_unknown")
 check("A2b 前瞻：沒有時間 → unresolved", S.classify_actions("X", "20261112", "20261210", dec, acts2, True, False)[0] == "unresolved")
-acts3 = dict(by_code={}, covered={"202611"})
+acts3 = dict(by_code={}, covered={"202611"}, **VER(("202611",)))
 check("A2c 前瞻：事件表沒涵蓋持有期月份 → unresolved", S.classify_actions("X", "20261112", "20261210", dec, acts3, True, False)[0] == "unresolved")
 check("A2d 前瞻：沒有事件表 → unresolved（不能用暫代）", S.classify_actions("X", "20261112", "20261210", dec, None, True, True)[0] == "unresolved")
 check("A2e 歷史：沒涵蓋 → 暫代旗標", S.classify_actions("X", "20261112", "20261210", dec, acts3, False, True)[0] == "proxy" and
       S.classify_actions("X", "20261112", "20261210", dec, acts3, False, False)[0] is None)
-acts4 = dict(by_code={"X": [dict(eff="20261120", known_at=None, cash=True, type="ex_dividend", id="d")]}, covered={"202611", "202612"})
+acts4 = dict(by_code={"X": [dict(eff="20261120", known_at=None, cash=True, type="ex_dividend", id="d")]}, covered={"202611", "202612"},
+             **VER(("202611", "202612")))
 r4 = S.classify_actions("X", "20261112", "20261210", dec, acts4, True, False)
 check("A2f 純除息不排除、標 cash_div", r4[0] is None and r4[2] is True)
 check("A2g 生效日＝進場日不算持有期內", S.classify_actions("X", "20261120", "20261210", dec, acts2, True, False)[0] is None)
@@ -165,7 +171,7 @@ def A(rows, cov=cov_all):
     by = {}
     for code, e, known, cash in rows:
         by.setdefault(code, []).append(dict(eff=e, known_at=known, cash=cash, type="t", id="%s|%s" % (code, e)))
-    return dict(by_code=by, covered=set(cov))
+    return dict(by_code=by, covered=set(cov), **VER(cov))
 r1 = S.run_version(px, rev, days_, 11, A([(c0, eff, S.at_tpe(days_[ei - 5]), False)]))[ym0]
 check("T11a 歷史：決策前已知 → 跳過、月有效", r1["h"][20]["ca"].get("skip_known") == 1 and S.month_valid(r1) and
       all(abs(x - manual) > 1e-9 for x in r1["h"][20]["raw_q5"]))
@@ -195,33 +201,38 @@ root = tempfile.mkdtemp(); sd = os.path.join(root, "snap", fwd); os.makedirs(sd)
 data = ("market,code,ym,rev\n" + "".join("sii,%s,%s,%r\n" % (c, y, v) for c, mm_ in rev.items() for y, v in mm_.items())).encode()
 open(os.path.join(sd, "panel.csv"), "wb").write(data)
 nm = S.ym_add(fwd, 1)
-cut = "%s-%s-11T11:30:00Z" % (nm[:4], nm[4:])
-json.dump(dict(revenue_month=fwd, cutoff_at=cut, panel_sha256=hashlib.sha256(data).hexdigest()), open(os.path.join(sd, "meta.json"), "w"))
-snaps = S.load_snapshots(os.path.join(root, "snap"))
+cut = "%s-%s-11T11:40:00Z" % (nm[:4], nm[4:])
+mr = os.path.join(root, "metas"); os.makedirs(mr)
+def put_meta(dirp, meta, persist=True, persist_meta=None):
+    json.dump(meta, open(os.path.join(dirp, "meta.json"), "w"))
+    if persist:
+        json.dump(persist_meta if persist_meta is not None else meta, open(os.path.join(mr, os.path.basename(dirp) + ".json"), "w"))
+M0 = dict(revenue_month=fwd, formal=True, cutoff_at=cut, panel_sha256=hashlib.sha256(data).hexdigest())
+put_meta(sd, M0)
+snaps = S.load_snapshots(os.path.join(root, "snap"), mr)
 check("A1a 快照讀得到", fwd in snaps)
 mx = S.run_version(px, rev, days_, 11, snaps=snaps, decisions={}, forward_first=fwd)[fwd]
 check("A1b 前瞻月沒有決策紀錄 → missing_decision（不用名義時間回填）", mx["status"] == "missing_decision" and not S.month_valid(mx))
 # 用 decide() 在 S 日晚上寫決策紀錄
 droot = os.path.join(root, "dec")
 nowS = S.at_tpe(Sd, 23, 10, 0)
-w = S.decide({c: {k: v for k, v in r.items() if k <= Sd} for c, r in px.items()}, snaps, [d for d in days_ if d <= Sd], E, nowS,
-             root=droot, forward_first=fwd)
-check("A1c decide 寫下 11、16 日版中符合的那版（11 日版）", any(p.endswith("%s_v11.json" % fwd) for p in w) and
-      not any(p.endswith("%s_v16.json" % fwd) for p in w), w)
-w2 = S.decide({c: {k: v for k, v in r.items() if k <= Sd} for c, r in px.items()}, snaps, [d for d in days_ if d <= Sd], E,
-              S.at_tpe(Sd, 23, 30, 0), root=droot, forward_first=fwd)
-check("A1d 已有紀錄 → 不覆寫", not any(p.endswith("_v11.json") for p in w2))
+pxS = {c: {k: v for k, v in r.items() if k <= Sd} for c, r in px.items()}
+w = S.decide(pxS, snaps, [d for d in days_ if d <= Sd], E, lambda: nowS, root=droot, forward_first=fwd)
+check("A1c decide 寫下 11、16 日版中符合的那版（11 日版）", any(os.path.basename(p).startswith("%s_v11_" % fwd) for p in w) and
+      not any("_v16_" in p for p in w), w)
+w2 = S.decide(pxS, snaps, [d for d in days_ if d <= Sd], E, lambda: S.at_tpe(Sd, 23, 30, 0), root=droot, forward_first=fwd)
+check("A1d 已有同一預定日的紀錄 → 不再寫", not w2, w2)
 decs = S.load_decisions(droot)
 mf = S.run_version(px, rev, days_, 11, A([]), snaps=snaps, decisions=decs, forward_first=fwd)[fwd]
 mh = S.run_version(px, rev, days_, 11, A([]))[fwd]
 check("A1e 前瞻用決策紀錄：進場日、名單與歷史名義算法一致時結果相同", mf["E"] == mh["E"] and
       sorted(mf["h"][20]["raw_q5"]) == sorted(mh["h"][20]["raw_q5"]) and S.month_valid(mf), (mf["status"], mf["E"], mh["E"]))
 # 延誤：決策在進場日 09:05 才算完 → 順延，但前一交易日已不是當時的價量基準日 → 決策過期
-late = dict(decs[(fwd, 11)]); late["_decision_at"] = S.open_at(E) + dt.timedelta(minutes=5)
-ml = S.run_version(px, rev, days_, 11, snaps=snaps, decisions={(fwd, 11): late}, forward_first=fwd)[fwd]
+late = dict(decs[(fwd, 11)][0]); late["_decision_at"] = S.open_at(E) + dt.timedelta(minutes=5)
+ml = S.run_version(px, rev, days_, 11, snaps=snaps, decisions={(fwd, 11): [late]}, forward_first=fwd)[fwd]
 check("A1f 決策晚於開盤 → 不倒填開盤；價量基準日過期 → decision_stale、月無效", ml["status"] == "decision_stale" and ml["E"] is None)
-bad = dict(decs[(fwd, 11)]); bad["snapshot_sha256"] = "0" * 64
-check("A1g 決策紀錄的快照雜湊對不上 → 不用", S.run_version(px, rev, days_, 11, snaps=snaps, decisions={(fwd, 11): bad},
+bad = dict(decs[(fwd, 11)][0]); bad["snapshot_sha256"] = "0" * 64
+check("A1g 決策紀錄的快照雜湊對不上 → 不用", S.run_version(px, rev, days_, 11, snaps=snaps, decisions={(fwd, 11): [bad]},
                                                     forward_first=fwd)[fwd]["status"] == "decision_snapshot_mismatch")
 # 前瞻 + 事件表沒涵蓋 → 未解、月無效；保留原筆
 mfc = S.run_version(px, rev, days_, 11, A([], cov=set()), snaps=snaps, decisions=decs, forward_first=fwd)[fwd]
@@ -235,25 +246,25 @@ check("A2j 前瞻：事件沒有時間 → 未解、保留原筆、月無效", m
       any(abs(x - manual) < 1e-9 for x in mfu["h"][20]["raw_q5"]))
 # 快照雜湊被改 → 不收
 open(os.path.join(sd, "panel.csv"), "ab").write(b"x")
-check("A1h 快照雜湊對不上 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap")))
+check("A1h 快照雜湊對不上 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap"), mr))
 # 快照 cutoff 早於 M+1 月 11 日 → 不收
 sd2 = os.path.join(root, "snap2", fwd); os.makedirs(sd2); open(os.path.join(sd2, "panel.csv"), "wb").write(data)
-json.dump(dict(revenue_month=fwd, cutoff_at="%s-%s-10T11:30:00Z" % (nm[:4], nm[4:]), panel_sha256=hashlib.sha256(data).hexdigest()),
-          open(os.path.join(sd2, "meta.json"), "w"))
-check("A1i 快照 cutoff 早於 11 日 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap2")))
+put_meta(sd2, dict(M0, cutoff_at="%s-%s-10T11:30:00Z" % (nm[:4], nm[4:])))
+check("A1i 快照 cutoff 早於 11 日 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap2"), mr))
 sd3 = os.path.join(root, "snap3", fwd); os.makedirs(sd3); open(os.path.join(sd3, "panel.csv"), "wb").write(data)
-json.dump(dict(revenue_month=S.ym_add(fwd, 1), cutoff_at=cut, panel_sha256=hashlib.sha256(data).hexdigest()), open(os.path.join(sd3, "meta.json"), "w"))
-check("A1j meta 月份跟資料夾不同 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap3")))
-mr = os.path.join(root, "metas"); os.makedirs(mr); json.dump(dict(panel_sha256="1" * 64), open(os.path.join(mr, fwd + ".json"), "w"))
+put_meta(sd3, dict(M0, revenue_month=S.ym_add(fwd, 1)))
+check("A1j meta 月份跟資料夾不同 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap3"), mr))
 sd4 = os.path.join(root, "snap4", fwd); os.makedirs(sd4); open(os.path.join(sd4, "panel.csv"), "wb").write(data)
-json.dump(dict(revenue_month=fwd, cutoff_at=cut, panel_sha256=hashlib.sha256(data).hexdigest()), open(os.path.join(sd4, "meta.json"), "w"))
+put_meta(sd4, M0, persist_meta=dict(M0, panel_sha256="1" * 64))
 check("A1k 跟 repo 裡的持久雜湊不一致 → 不收", fwd not in S.load_snapshots(os.path.join(root, "snap4"), mr))
+put_meta(sd4, M0)          # 還原
 # decide 延誤原因
 droot2 = os.path.join(root, "dec2")
-S.decide({c: {k: v for k, v in r.items() if k <= days_[ei]} for c, r in px.items()}, snaps if snaps else S.load_snapshots(os.path.join(root, "snap4")),
-         [d for d in days_ if d <= days_[ei]], days_[ei + 1], S.at_tpe(days_[ei], 23, 0, 0), root=droot2, forward_first=fwd)
+snaps4 = S.load_snapshots(os.path.join(root, "snap4"), mr)
+S.decide({c: {k: v for k, v in r.items() if k <= days_[ei]} for c, r in px.items()}, snaps4,
+         [d for d in days_ if d <= days_[ei]], days_[ei + 1], lambda: S.at_tpe(days_[ei], 23, 0, 0), root=droot2, forward_first=fwd)
 dd2 = S.load_decisions(droot2)
-check("A1l 名義最早日已過才決策 → 記延誤原因", (fwd, 11) in dd2 and dd2[(fwd, 11)]["delay_reason"], dd2.get((fwd, 11), {}).get("delay_reason"))
+check("A1l 名義最早日已過才決策 → 記延誤原因", (fwd, 11) in dd2 and dd2[(fwd, 11)][0]["delay_reason"])
 
 # ---- 判定：只在 12／24／36 正式檢視 ----
 def fake(excess, t_ok, net, months):
@@ -276,6 +287,135 @@ check("J6 前瞻段沒有快照與決策紀錄 → 全部不算（不偷用 pane
 check("J7 報告與逐筆清單產生", "前瞻" in S.report(res) and len(res["_trades"][11]) > 0)
 check("J8 下一個市場日跳過週末與官方休市", S.next_market_day("20261009", ["20261012"]) == "20261013" and
       S.next_market_day("20261023", []) == "20261026")
+
+# ======== GPT 08：P1～P6 反例 ========
+def seq(*ts):
+    it = iter(ts)
+    last = [ts[-1]]
+    def f():
+        try:
+            last[0] = next(it)
+        except StopIteration:
+            pass
+        return last[0]
+    return f
+# P1a 開始在開盤前、算完已過開盤 → 不寫正式紀錄、只寫嘗試紀錄；之後還能重新決策
+dr3 = os.path.join(root, "dec3")
+t0, t1 = S.open_at(E) - dt.timedelta(seconds=1), S.open_at(E) + dt.timedelta(seconds=1)
+w3 = S.decide(pxS, snaps, [d for d in days_ if d <= Sd], E, seq(t0, t0, t1), root=dr3, forward_first=fwd)
+att = os.listdir(os.path.join(dr3, "attempts")) if os.path.isdir(os.path.join(dr3, "attempts")) else []
+check("P1a 算完時已過開盤 → 沒有正式紀錄、有嘗試紀錄（late_after_open）", not w3 and not S.load_decisions(dr3) and len(att) == 1 and
+      json.load(open(os.path.join(dr3, "attempts", att[0]), encoding="utf-8"))["status"] == "late_after_open", (w3, att))
+rec0 = decs[(fwd, 11)][0]
+check("P1a2 decision_at＝算完才讀的時間（不是開始時間）", S.decide(pxS, snaps, [d for d in days_ if d <= Sd], E,
+      seq(S.at_tpe(Sd, 23, 0, 0), S.at_tpe(Sd, 23, 0, 0), S.at_tpe(Sd, 23, 7, 0)), root=os.path.join(root, "dec3b"), forward_first=fwd) and
+      S.load_decisions(os.path.join(root, "dec3b"))[(fwd, 11)][0]["decision_at"].startswith("%s-%s-%sT23:07" % (Sd[:4], Sd[4:6], Sd[6:])))
+# P1b 決策後只修訂 ETF 基準日成交額 → 前瞻對照組仍用當時母體；差異另報
+pxE = dict(px); donor = sorted(px)[0]
+pxE["9999"] = {k: (v[0], v[1] * 1.0, v[2], 20000.0) for k, v in px[donor].items()}
+pxE["9999"] = {k: (v[0] * 1.01, v[1] * 1.02, v[2], v[3]) for k, v in pxE["9999"].items()}
+dr4 = os.path.join(root, "dec4")
+S.decide({c: {k: v for k, v in r.items() if k <= Sd} for c, r in pxE.items()}, snaps, [d for d in days_ if d <= Sd], E, lambda: nowS,
+         root=dr4, forward_first=fwd)
+d4 = S.load_decisions(dr4)
+check("P1b0 決策紀錄存完整母體（含沒有營收的代號）與價量列雜湊", "9999" in d4[(fwd, 11)][0]["universe"] and d4[(fwd, 11)][0]["universe_rows_sha256"])
+pxE2 = dict(pxE); pxE2["9999"] = dict(pxE["9999"]); o_ = pxE2["9999"][Sd]; pxE2["9999"][Sd] = (o_[0], o_[1], o_[2], 5000.0)
+fa = S.run_version(pxE, rev, days_, 11, A([]), snaps=snaps, decisions=d4, forward_first=fwd)[fwd]
+fb = S.run_version(pxE2, rev, days_, 11, A([]), snaps=snaps, decisions=d4, forward_first=fwd)[fwd]
+check("P1b 後修價量不改當時對照母體（母體平均不變），另標重算不同與價量被修訂",
+      S.month_valid(fa) and S.month_valid(fb) and abs(fa["h"][20]["uni"] - fb["h"][20]["uni"]) < 1e-12 and fb["n_cand"] == fa["n_cand"]
+      and fb.get("universe_recompute_mismatch") and fb.get("price_revised_after_decision"), (fa["n_cand"], fb["n_cand"]))
+# P1c 讀取端驗時間：decision_at 早於快照 cutoff、算完晚於 decision_at → 不用
+bad1 = dict(rec0); bad1["_decision_at"] = snaps[fwd]["cutoff_at"] - dt.timedelta(hours=1); bad1["_completed_at"] = bad1["_decision_at"]
+check("P1c decision_at 早於快照 cutoff（11 日 18:00 對 19:30）→ decision_invalid",
+      S.run_version(px, rev, days_, 11, A([]), snaps=snaps, decisions={(fwd, 11): [bad1]}, forward_first=fwd)[fwd]["status"] == "decision_invalid")
+bad2 = dict(rec0); bad2["_completed_at"] = rec0["_decision_at"] + dt.timedelta(minutes=1)
+check("P1d 算完時間晚於 decision_at → decision_invalid",
+      S.run_version(px, rev, days_, 11, A([]), snaps=snaps, decisions={(fwd, 11): [bad2]}, forward_first=fwd)[fwd]["status"] == "decision_invalid")
+bad3 = dict(rec0); bad3["registration_sha256"] = "f" * 64
+check("P1e 登記雜湊不同 → decision_invalid",
+      S.run_version(px, rev, days_, 11, A([]), snaps=snaps, decisions={(fwd, 11): [bad3]}, forward_first=fwd)[fwd]["status"] == "decision_invalid")
+# P4 臨時休市在紀錄寫好之後才公告：預定進場日沒開市 → 這份過期；當晚重新決策，用新的一份
+daysC = [d for d in days_ if d != E]
+mc_ = S.run_version(px, rev, daysC, 11, A([]), snaps=snaps, decisions=decs, forward_first=fwd)[fwd]
+check("P4a 預定進場日臨時休市 → 舊紀錄 decision_stale（不倒填、不靜默改檔）", mc_["status"] == "decision_stale", mc_["status"])
+nxt = days_[ei + 1]
+w5 = S.decide(pxS, snaps, [d for d in daysC if d <= Sd], nxt, lambda: S.at_tpe(E, 23, 10, 0), root=droot, forward_first=fwd)
+d5 = S.load_decisions(droot)
+check("P4b 休市當晚另寫一份新紀錄（舊的保留、記被取代）", len(w5) == 1 and len(d5[(fwd, 11)]) == 2 and
+      d5[(fwd, 11)][1]["superseded_attempts"], w5)
+mc2 = S.run_version(px, rev, daysC, 11, A([]), snaps=snaps, decisions=d5, forward_first=fwd)[fwd]
+check("P4c 用最早一份實際可執行的紀錄：進場順延到下一個市場日", S.month_valid(mc2) and mc2["E"] == nxt, (mc2["status"], mc2["E"]))
+w6 = S.decide(pxS, snaps, [d for d in daysC if d <= Sd], nxt, lambda: S.at_tpe(E, 23, 30, 0), root=droot, forward_first=fwd)
+check("P4d 同一預定日已有紀錄 → 不重寫", not w6)
+hol = ["20261010", "20261023", "20261025", "20261026"]
+check("P4e 合併臨時休市：10/22 之後下一個市場日＝10/27", S.next_market_day("20261022", hol) == "20261027" and
+      S.next_market_day("20261022", ["20261010", "20261025", "20261026"]) == "20261023")
+cm = dict(built_at=S.parse_time("2026-10-25T01:00:00Z"), schedule_years=["2026"])
+check("P4f 日曆新鮮且涵蓋年度 → 可用；超過 36 小時、年度沒涵蓋、沒有日曆 → 不可用",
+      S.calendar_usable(cm, "20261027", S.parse_time("2026-10-25T20:00:00+08:00"))[0] and
+      not S.calendar_usable(cm, "20261027", S.parse_time("2026-10-27T20:00:00+08:00"))[0] and
+      not S.calendar_usable(cm, "20270104", S.parse_time("2026-10-25T20:00:00+08:00"))[0] and
+      not S.calendar_usable(None, "20261027", S.parse_time("2026-10-25T20:00:00+08:00"))[0])
+import market_calendar as MC, gzip
+ct = tempfile.mkdtemp(); MC.RAW = os.path.join(ct, "raw"); MC.OUT = os.path.join(ct, "cal.json"); MC.CLOSURES = os.path.join(ct, "cl.json")
+os.makedirs(MC.RAW)
+gzip.open(os.path.join(MC.RAW, "FMTQIK_202610.json.gz"), "wb").write(json.dumps(dict(stat="OK", data=[["115/10/21"], ["115/10/22"]])).encode())
+gzip.open(os.path.join(MC.RAW, "holidaySchedule.json.gz"), "wb").write(json.dumps([dict(Date="1151026", Name="補假", Description="")]).encode())
+json.dump([dict(date="20261023", reason="颱風", announced_at="20261022", source_url="https://www.twse.com.tw/x.pdf")], open(MC.CLOSURES, "w"))
+cj = MC.build()
+check("P4g 日曆建置：臨時休市併入休市日、記來源與涵蓋年度", "20261023" in cj["holidays"] and cj["closures"] == ["20261023"] and
+      cj["schedule_years"] == ["2026"] and cj["closure_sources"][0]["source_url"])
+json.dump([dict(date="20261023", reason="颱風")], open(MC.CLOSURES, "w"))
+try:
+    MC.build(); check("P4h 臨時休市紀錄缺官方網址或公告日 → 拒絕", False)
+except SystemExit:
+    check("P4h 臨時休市紀錄缺官方網址或公告日 → 拒絕", True)
+# P2 歷史月不用今天的 first_seen 當公告時間
+evh = dict(by_code={"X": [dict(eff="20211120", ann=None, seen=S.parse_time("2026-10-25T00:00:00Z"), cash=False, type="t", id="h")]},
+           covered={"202111", "202112"}, **VER(("202111", "202112")))
+dh = S.at_tpe("20211111", 23, 59, 59)
+check("P2a 歷史：公告時間空白、first_seen＝今天 → announce_unknown（不是 unresolved）",
+      S.classify_actions("X", "20211112", "20211210", dh, evh, False, False)[0] == "announce_unknown")
+evh["by_code"]["X"][0]["ann"] = S.at_tpe("20211115")
+check("P2b 歷史：可靠公告時間晚於決策 → unresolved", S.classify_actions("X", "20211112", "20211210", dh, evh, False, False)[0] == "unresolved")
+evf = dict(by_code={"X": [dict(eff="20261120", ann=None, seen=S.parse_time("2026-11-10T12:00:00Z"), cash=False, type="t", id="f")]},
+           covered={"202611", "202612"}, **VER(("202611", "202612")))
+check("P2c 前瞻：當時保存的 first_seen 早於決策 → skip_known", S.classify_actions("X", "20261112", "20261210", dec, evf, True, False)[0] == "skip_known")
+evf["by_code"]["X"][0]["seen"] = S.parse_time("2026-11-20T12:00:00Z")
+check("P2d 前瞻：first_seen 晚於決策、沒有公告時間 → unresolved", S.classify_actions("X", "20261112", "20261210", dec, evf, True, False)[0] == "unresolved")
+# P5 事件表：不可用、抓取時間早於出場日
+bad_a = A([]); bad_a["ok"] = False
+check("P5a 事件表與 coverage 雜湊不符（不可用）→ 前瞻未解、歷史改暫代",
+      S.classify_actions("X", "20261112", "20261210", dec, bad_a, True, False)[0] == "unresolved" and
+      S.classify_actions("X", "20261112", "20261210", dec, bad_a, False, True)[0] == "proxy")
+early = dict(by_code={}, covered={"202611", "202612"}, **VER(("202611", "202612"), at=S.parse_time("2026-12-01T00:00:00Z")))
+check("P5b 前瞻：來源月抓取時間早於 min(出場日, 月底) → 未解（月份有抓過不等於核對到出場日）",
+      S.classify_actions("X", "20261112", "20261210", dec, early, True, False)[0] == "unresolved" and
+      S.classify_actions("X", "20261112", "20261130", dec, early, True, False)[0] is None)
+check("P5c 歷史：同一份抓取時間（遠晚於出場）照常涵蓋", S.classify_actions("X", "20261112", "20261210", dec, A([]), False, False)[0] is None)
+# P6 前瞻 trim10 用紀錄的 SUS 值重新分組
+recT = dict(rec0); keep = sorted(rec0["sus"])[:10]
+recT["sus"] = {c: (z if c in keep else 50.0) for c, z in rec0["sus"].items()}
+mt_ = S.run_version(px, rev, days_, 11, A([]), sens_trim=True, snaps=snaps, decisions={(fwd, 11): [recT]}, forward_first=fwd)[fwd]
+mm_ = S.run_version(px, rev, days_, 11, A([]), snaps=snaps, decisions={(fwd, 11): [recT]}, forward_first=fwd)[fwd]
+check("P6a 前瞻 trim10：大多數 |SUS|>10 → 排除後不足 50 家＝too_few；主結果不受影響", mt_["status"] == "too_few" and S.month_valid(mm_),
+      (mt_["status"], mm_["status"]))
+S.PRICE_QC[c0] = {days_[ei + 2]}
+rq = S.run_version(px, rev, days_, 11)[ym0]
+S.PRICE_QC.clear()
+check("P6b 價量 QC（短列或重複日期）落在持有期 → 資料錯誤、月無效", not S.month_valid(rq) and any("price_qc" in x for x in rq["data_error"]))
+p0 = mod(c0, lambda r: dict(r, **{days_[ei + 2]: (r[days_[ei + 2]][0], 0.0, r[days_[ei + 2]][2], r[days_[ei + 2]][3])}))
+check("P6c 持有期內收盤 0（非正但有限）→ 資料錯誤", S.run_version(p0, rev, days_, 11)[ym0]["h"][20]["data_error"] >= 1)
+pz = mod(c0, lambda r: dict(r, **{E: (0.0, r[E][1], r[E][2], r[E][3])}))
+check("P6d 進場開盤 0 → 資料錯誤（不當停牌）", not S.month_valid(S.run_version(pz, rev, days_, 11)[ym0]))
+qd = tempfile.mkdtemp()
+open(os.path.join(qd, "1234.txt"), "w").write("# h\n" + "".join("2025%02d%02d,1,1,1,1,1,20000\n" % (1 + k // 28, 1 + k % 28) for k in range(40)) +
+                                              "20250101,9,9,9,9,9,9\n20250301,1,1\n")
+S.load_prices(qd)
+check("P6e 讀價量：重複日期保留第一筆並記 QC、短列記 QC", S.PRICE_QC["1234"] == {"20250101", "20250301"})
+S.PRICE_QC.clear()
+check("P6f 報告分開列「完全沒有營收」與「當月無營收」", "完全沒有營收／當月無營收" in S.report(res))
 
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

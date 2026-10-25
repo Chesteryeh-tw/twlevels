@@ -101,5 +101,55 @@ CA.build()
 cov = json.load(open(CA.COVERAGE, encoding="utf-8"))
 check("C13 帳本說 ok 但原始檔不見 → 缺、不涵蓋", "202101" not in cov["months"] and "TWTAUU_202101" in cov["missing"])
 
+# ---- GPT 08 P2／P5 ----
+import sus_study as SS
+tmp4 = tempfile.mkdtemp(); os.chdir(tmp4); man = {}
+j = json.load(open(os.path.join(HERE, "testdata", "corp", "TWT49U.json"), encoding="utf-8"))
+j["strDate"], j["endDate"] = "20260901", "20260930"; put("TWT49U", "202609", json.dumps(j, ensure_ascii=False).encode())
+man["TWT49U_202609"]["at"] = "2026-10-01T00:00:00Z"; CA.save_man(man)
+CA.build()
+a = SS.load_actions(CA.OUT, CA.COVERAGE)
+cov = json.load(open(CA.COVERAGE, encoding="utf-8"))
+check("P5a coverage 記事件表與 first_seen 雜湊，讀取端驗過可用", a["ok"] and cov["csv_sha256"] and cov["first_seen_sha256"], a.get("why"))
+seen0 = json.load(open(CA.FIRST_SEEN, encoding="utf-8"))
+ev = next(k for k in seen0 if "|6669|" in k)
+check("P2a first_seen 繫結列內容雜湊", seen0[ev][0]["row_sha256"] and seen0[ev][0]["first_seen_at"] == "2026-10-01T00:00:00Z")
+# 官方修訂同一事件內容 → 新版本另記時間，不沿用舊時間
+fi = j["fields"].index("權/息") if "權/息" in j["fields"] else None
+row = next(r for r in j["data"] if "6669" in r)
+row[-1] = str(row[-1]) + "（修訂）"
+put("TWT49U", "202609", json.dumps(j, ensure_ascii=False).encode()); man["TWT49U_202609"]["at"] = "2026-10-20T00:00:00Z"; CA.save_man(man)
+rows5, _b = CA.build()
+seen1 = json.load(open(CA.FIRST_SEEN, encoding="utf-8"))
+w = [r for r in rows5 if r["code"] == "6669"][0]
+check("P2b 內容修訂 → 新版本 first_seen＝新抓取時間，舊版本保留", len(seen1[ev]) == 2 and w["first_seen_at"] == "2026-10-20T00:00:00Z", seen1[ev])
+# 舊格式登錄（只有時間）→ 繫結當下內容、保留時間
+json.dump({ev: "2026-09-05T00:00:00Z"}, open(CA.FIRST_SEEN, "w", encoding="utf-8"))
+rows6, _b = CA.build()
+check("P2c 舊格式登錄 → 繫結內容、沿用原時間", [r for r in rows6 if r["code"] == "6669"][0]["first_seen_at"] == "2026-09-05T00:00:00Z")
+# P5a 故障注入：每一個發布步驟中斷 → 讀取端不是讀到上一整套，就是判定不可用（不會新舊混用還當可用）
+good_csv = open(CA.OUT, "rb").read()
+real_replace = os.replace
+for k in range(3):
+    put("TWT49U", "202609", json.dumps(dict(j, data=j["data"][:4 + k]), ensure_ascii=False).encode()); CA.save_man(man)
+    calls = [0]
+    def boom(a_, b_, k=k):
+        if b_ in (CA.OUT, CA.FIRST_SEEN, CA.COVERAGE):
+            if calls[0] == k:
+                raise OSError("注入中斷")
+            calls[0] += 1
+        return real_replace(a_, b_)
+    os.replace = boom
+    try:
+        CA.build()
+    except OSError:
+        pass
+    os.replace = real_replace
+    a = SS.load_actions(CA.OUT, CA.COVERAGE)
+    consistent = a["ok"] and json.load(open(CA.COVERAGE, encoding="utf-8"))["csv_sha256"] == hashlib.sha256(open(CA.OUT, "rb").read()).hexdigest()
+    check("P5a-%d 發布第 %d 步中斷 → 舊整套可用或判不可用" % (k + 1, k + 1), (k == 0 and consistent) or (k > 0 and not a["ok"]), a.get("why"))
+    CA.build()      # 復原成完整一套
+check("P5b coverage.verified 有每個涵蓋來源月的抓取時間", json.load(open(CA.COVERAGE, encoding="utf-8")).get("verified"))
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

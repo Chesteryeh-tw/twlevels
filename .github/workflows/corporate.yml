@@ -74,3 +74,8 @@ jobs:
         run: |
           echo "抓取被拒或有錯，看「抓取、建表、比對價格斷點」那一步。已抓到的已存快取，下次會接著抓。"
           exit 1
+      - name: 市場日曆失敗也標紅（GPT 08 P4：日曆不可靠時 SUS 前瞻決策不會寫）
+        if: always() && steps.cal.outcome == 'failure'
+        run: |
+          echo "官方市場日曆更新失敗，看「官方市場日曆」那一步。"
+          exit 1

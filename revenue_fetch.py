@@ -536,15 +536,33 @@ def export_early():
         "%s %s %d 列 %d bytes sha %s" % (m["market"], m["requested_ym"], m["rows"], m["bytes"], m["sha256"][:12]) for m in meta)))
 
 
+SNAP_CLOCK = None       # 測試用：回傳 aware datetime 的函式；None＝現在
+
+
+def snapshot_window(ym):
+    """GPT 08 P3：正式共同快照只在 M+1 月 11 日 19:30 ～ 12 日 09:00（台北）之間建立；時窗外抓到的不能當這個月的快照。"""
+    tpe = dt.timezone(dt.timedelta(hours=8))
+    y, m = int(ym[:4]), int(ym[4:])
+    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return dt.datetime(y, m, 11, 19, 30, tzinfo=tpe), dt.datetime(y, m, 12, 9, 0, tzinfo=tpe)
+
+
 def save_snapshot(ym):
-    """SUS 事先登記 v2.4 第 2、9 節「共同營收快照」：營收月 ym 第一次成功發布 panel 時，把當下整張 panel 原樣存成不可變快照，
-    記下 cutoff_at（這一刻的 UTC 時間）與雜湊。已存在就不動（之後的更正不回填）。11 日版與 16 日版都只用這一份。"""
+    """SUS 事先登記 v2.4 第 2、9 節「共同營收快照」：營收月 ym 在正式時窗內第一次成功發布 panel 時，把當下整張 panel
+    原樣存成不可變快照。已存在就不動（之後的更正不回填）。11 日版與 16 日版都只用這一份。
+    meta：formal、captured_at（開始存）、cutoff_at（重讀驗完雜湊的時間）、panel 雜湊、generation、來源原始檔雜湊清單；
+    snapshot_pit＝true 只代表「這份快照確實在這個時間取得」，history_pit_verified＝false（歷史月仍是現在查得到的版本）。"""
+    now = (SNAP_CLOCK or (lambda: dt.datetime.now(dt.timezone.utc)))()
+    lo, hi = snapshot_window(ym)
     d = os.path.join(SNAP, ym)
     if os.path.exists(os.path.join(d, "meta.json")):
         return False
+    if not (lo <= now < hi):
+        print("::notice::快照：現在不在營收月 %s 的正式時窗（%s～%s），不建正式快照" % (ym, lo.isoformat(), hi.isoformat()))
+        return False
     try:
         import revenue_panel
-        pp, _mp, _ = revenue_panel.resolve(OUT)
+        pp, mp, _ = revenue_panel.resolve(OUT)
     except SystemExit as e:
         print("快照：panel 不一致（%s），不存" % e)
         return False
@@ -552,15 +570,24 @@ def save_snapshot(ym):
         return False
     data = open(pp, "rb").read()
     sha = hashlib.sha256(data).hexdigest()
+    srcs = sorted({(r["market"], r["ym"], r["raw_sha256"]) for r in csv.DictReader(io.StringIO(data.decode("utf-8")))})
+    gen = json.load(open(mp, encoding="utf-8")).get("generation") if mp and os.path.exists(mp) else None
     save_atomic(os.path.join(d, "panel.csv"), data)
     if hashlib.sha256(open(os.path.join(d, "panel.csv"), "rb").read()).hexdigest() != sha:
         print("快照：重讀雜湊對不上，不寫 meta")
         return False
-    meta = dict(revenue_month=ym, cutoff_at=utc_now(), panel_sha256=sha, source=os.path.relpath(pp, OUT), pit_verified=True)
+    done = (SNAP_CLOCK or (lambda: dt.datetime.now(dt.timezone.utc)))()
+    if not (lo <= done < hi):
+        print("::notice::快照：驗完時已超過正式時窗，不寫 meta")
+        return False
+    fmt = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta = dict(revenue_month=ym, formal=True, captured_at=fmt(now), cutoff_at=fmt(done), panel_sha256=sha,
+                panel_generation=gen, source=os.path.relpath(pp, OUT),
+                sources_sha256=hashlib.sha256(json.dumps(srcs).encode()).hexdigest(), sources_count=len(srcs),
+                snapshot_pit=True, history_pit_verified=False)
     mb = json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8")
     save_atomic(os.path.join(d, "meta.json"), mb)
-    # GPT 06 C：快取不是永久證據。meta（只有月份、cutoff、雜湊，沒有營收數字）另存一份進 repo；已存在就不動。
-    # 快取遺失時原始快照就是缺資料，不能重抓之後的版本冒充（雜湊對不上 sus_study 會拒收）。
+    # 快取不是永久證據。meta（沒有營收數字）另存一份進 repo；已存在就不動。sus_study 要求兩份整份相同。
     pm = os.path.join(SNAP_META, "%s.json" % ym)
     if not os.path.exists(pm):
         save_atomic(pm, mb)

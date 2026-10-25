@@ -5,6 +5,10 @@
 - 未來：證交所 OpenAPI 休市日表 holidaySchedule。說明含「開始交易」「最後交易」的是交易日（不算休市）；其餘列為休市。
 - 抓取間隔 4～7 秒隨機；401／403／407／429／451、轉址、回網頁 → 停（不換位址）。原始回應存 data/cal_raw/（Actions 快取 cal-raw-）。
 
+- 臨時休市（GPT 08 P4）：年度休市表不含颱風等臨時停市。已核實的官方公告記在 data/market_closures.json
+  （日期、原因、公告日、官方網址、原檔 SHA-256），併入休市日；臨時恢復開市則從休市日拿掉。
+- 輸出 schedule_years（休市表涵蓋的年度）與 built_at；SUS 前瞻決策只在日曆 36 小時內更新過、而且涵蓋下一個市場日年度時才用。
+
 用法：python market_calendar.py            全部（缺的月份才抓）
       python market_calendar.py --refresh  只重抓當月與休市日表
 """
@@ -12,6 +16,7 @@ import datetime as dt, gzip, hashlib, json, os, random, sys, time, urllib.error,
 
 RAW = os.path.join("data", "cal_raw")
 OUT = os.path.join("data", "market_calendar.json")
+CLOSURES = os.path.join("data", "market_closures.json")
 START = (2020, 1)
 UA = "twlevels-research (official market calendar; monthly, 4-7s apart)"
 STOP = {401, 403, 407, 429, 451}
@@ -115,8 +120,20 @@ def build():
                 trade_marked.add(d)
             else:
                 hol.add(d)
+    years = sorted({d[:4] for d in hol | trade_marked})
+    closures, reopen, cl_src = set(), set(), []
+    if os.path.exists(CLOSURES):
+        b = open(CLOSURES, "rb").read()
+        src["market_closures"] = hashlib.sha256(b).hexdigest()
+        for r in json.loads(b.decode("utf-8")):
+            if not (r.get("date") and r.get("source_url") and r.get("announced_at")):
+                raise SystemExit("market_closures.json 有一筆缺日期、公告日或官方網址：%r" % r)
+            (reopen if r.get("kind") == "reopen" else closures).add(r["date"])
+            cl_src.append(r)
+    hol = (hol | closures) - reopen
     conflict = sorted(d for d in hol if d in trading)
-    out = dict(trading_days=sorted(trading), holidays=sorted(hol), schedule_trading_marked=sorted(trade_marked),
+    out = dict(trading_days=sorted(trading), holidays=sorted(hol), closures=sorted(closures - reopen),
+               closure_sources=cl_src, schedule_years=years, schedule_trading_marked=sorted(trade_marked),
                conflicts_with_fmtqik=conflict, sources=src, built_at=dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
     tmp = OUT + ".tmp"
     json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=0)

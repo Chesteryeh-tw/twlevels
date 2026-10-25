@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
-"""SUS（標準化未預期營收）研究程式 v2。照 preregistration/SUS_事先登記_v2.4.md（SHA-256 8ffa6f31…78d8）實作，不加研究規則。
+"""SUS（標準化未預期營收）研究程式 v3。照 preregistration/SUS_事先登記_v2.4.md（SHA-256 8ffa6f31…78d8）實作，不加研究規則。
 
-v1（commit 4904407）經 GPT 2026-10-25 複核（06）不通過實作驗收；v2 修 A1～A4 與 B 項，凍結紀錄另記（SUS_程式凍結紀錄_v2）。
+v1（commit 4904407）、v2（efdeb3d）經 GPT 2026-10-25 複核（06、08）不通過實作驗收；v3 修 08 的 P1～P6，凍結紀錄另記
+（SUS_程式凍結紀錄_v3）。公式、成本、門檻、判定都沒有改。
+v3 實作口徑（08）：
+  P1 決策紀錄的 decision_at＝分組算完之後重新讀的時鐘；算完已過開盤 → 只寫嘗試紀錄（attempts/），不寫正式紀錄。
+     正式紀錄保存當時完整母體（代號＋基準日成交額）、SUS 值、分組、母體價量列雜湊；前瞻一律用紀錄裡的母體與名單，
+     後來價量修訂只另報差異。讀取端再驗：decision_at ≥ 快照 cutoff、算完 ≤ decision_at < 實際進場開盤、
+     價量基準日＝實際進場前一交易日、登記雜湊相符。紀錄可以有多份（臨時休市等），用最早一份實際可執行的。
+  P2 歷史月只用 announce_at（今天才抓到的 first_seen 不能當當年公告時間）；前瞻月用 announce_at 或 first_seen_at（當時保存的抓取時間）。
+  P3 正式快照：cutoff 在 M+1 月 11 日 19:30～12 日 09:00（台北）之間、meta.formal＝true、repo 持久 meta 必須存在且整份相同。
+  P4 市場日曆：前瞻決策只用官方日曆（年度休市表＋已核實的臨時休市公告）；日曆缺、超過 36 小時沒更新、下一個市場日的年度不在休市表 → 不寫決策。
+  P5 事件表：coverage.json 記事件表與 first_seen 的雜湊（最後寫、當發布點），讀取端雜湊不符＝事件表不可用；
+     前瞻另要求每個來源月的抓取時間晚於 min(出場日, 該月月底)。
+  P6 前瞻 trim10 用紀錄的 SUS 值排除 |SUS|>10 後重新分組；價量檔短列、重複日期、非正價格記 QC 並當資料錯誤。
 第一次讀真 SUS 結果之前先凍結。凍結後任何改動＝新版本登記。
 
 定義（第 1 節）  S_t＝單月營收（千元）；ΔS_t＝S_t−S_{t−12}；μ、σ＝前 24 個 ΔS（不含當月，ddof＝1）；SUS＝(ΔS_t−μ)/σ；
@@ -43,7 +55,7 @@ import statistics as st
 import sys
 from collections import defaultdict
 
-PROGRAM = "sus_study v2"
+PROGRAM = "sus_study v3"
 REGISTRATION = "preregistration/SUS_事先登記_v2.4.md"
 REGISTRATION_SHA256 = "8ffa6f3121ff31733c6f2f7685fa9beb14e64ce71311cdad4d832db40d3a78d8"
 FORWARD_FIRST_YM = "202610"
@@ -57,6 +69,8 @@ GAP_PROXY = 11.0
 NW_LAG = {5: 1, 20: 1, 60: 2}
 TPE = dt.timezone(dt.timedelta(hours=8))
 DECISIONS = os.path.join("data", "sus_decisions")
+CAL_MAX_AGE_H = 36
+PRICE_QC = defaultdict(set)      # code -> 有問題的日期（短列、重複日期）；load_prices 填
 
 
 # ---------- 小工具 ----------
@@ -188,23 +202,35 @@ def nw_t(series, lag):
 
 
 # ---------- 公司行動 ----------
-def load_actions(path, coverage_path=None):
-    """data/corporate_actions.csv（code, effective_date, type, announce_at, first_seen_at, cash_only, …）與
-    data/corporate_actions_coverage.json（{"months": [YYYYMM, …]}：七個來源都抓齊且驗過的月份）。
-    回傳 dict(by_code, covered)；沒有事件表回 None。沒有覆蓋檔＝covered 為空（等於全部沒涵蓋）。"""
+def _sha_file(p):
+    return hashlib.sha256(open(p, "rb").read()).hexdigest()
+
+
+def load_actions(path, coverage_path=None, first_seen_path=None):
+    """data/corporate_actions.csv 與 data/corporate_actions_coverage.json（發布點，最後寫）。
+    coverage 記 csv_sha256、first_seen_sha256、months（七個來源都驗過的月份）、verified（來源_月份 → 抓取時間）。
+    雜湊對不上（發布中斷、新舊混用）→ ok＝False（前瞻全部未解、歷史改用暫代）。沒有事件表回 None。
+    事件：ann＝官方公告時間（目前官方結果表沒有，空白）、seen＝該內容版本第一次被我們抓到的時間（P2：兩者分開存）。"""
     if not os.path.exists(path):
         return None
+    cov, ok, why = {}, True, ""
+    if coverage_path and os.path.exists(coverage_path):
+        cov = json.load(open(coverage_path, encoding="utf-8"))
+        if cov.get("csv_sha256") and cov["csv_sha256"] != _sha_file(path):
+            ok, why = False, "事件表雜湊跟 coverage 不同（發布中斷或新舊混用）"
+        fsp = first_seen_path or os.path.join(os.path.dirname(path), "corporate_actions_first_seen.json")
+        if ok and cov.get("first_seen_sha256") and (not os.path.exists(fsp) or cov["first_seen_sha256"] != _sha_file(fsp)):
+            ok, why = False, "first_seen 登錄檔雜湊跟 coverage 不同"
     by = defaultdict(list)
     for r in csv.DictReader(open(path, encoding="utf-8-sig")):
-        t = [x for x in (parse_time(r.get("announce_at")), parse_time(r.get("first_seen_at"))) if x is not None]
-        by[r["code"].strip()].append(dict(eff=r["effective_date"].strip(), known_at=min(t) if t else None,
+        by[r["code"].strip()].append(dict(eff=r["effective_date"].strip(), ann=parse_time(r.get("announce_at")),
+                                          seen=parse_time(r.get("first_seen_at")),
                                           cash=str(r.get("cash_only", "0")).strip() in ("1", "true", "True"),
-                                          type=r.get("type", ""), id="%s|%s|%s" % (r.get("source", ""), r["code"].strip(),
-                                                                                    r["effective_date"].strip())))
-    cov = set()
-    if coverage_path and os.path.exists(coverage_path):
-        cov = set(json.load(open(coverage_path, encoding="utf-8")).get("months", []))
-    return dict(by_code=by, covered=cov)
+                                          type=r.get("type", ""), id=r.get("event_id") or "%s|%s|%s" % (
+                                              r.get("source", ""), r["code"].strip(), r["effective_date"].strip())))
+    ver = {k: parse_time(v) for k, v in (cov.get("verified") or {}).items()}
+    return dict(by_code=by, covered=set(cov.get("months", [])), verified=ver or None, sources=cov.get("sources", []),
+                ok=ok, why=why)
 
 
 def months_between(a, b):
@@ -215,9 +241,41 @@ def months_between(a, b):
     return out
 
 
+def month_end(ym):
+    return (dt.date(int(ym[:4]), int(ym[4:]), 1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
+
+
+def covered_through(actions, entry, exit_date, forward):
+    """事件表是否涵蓋 (entry, exit] 的每個月份。前瞻（P5b）另要求每個來源月的抓取時間（台北日期）晚於 min(出場日, 月底)。"""
+    if actions is None or not actions.get("ok", True):
+        return False
+    for m in months_between(entry, exit_date):
+        if m not in actions["covered"]:
+            return False
+        if forward:
+            ver = actions.get("verified")
+            if not ver or not actions.get("sources"):
+                return False
+            need = min(exit_date, month_end(m).strftime("%Y%m%d"))
+            for src in actions["sources"]:
+                t = ver.get("%s_%s" % (src, m))
+                if t is None or t.astimezone(TPE).strftime("%Y%m%d") <= need:
+                    return False
+    return True
+
+
+def known_time(e, forward):
+    """P2：歷史月只信 announce_at；前瞻月 announce_at 或 first_seen_at（當時保存的抓取時間）取早的。
+    舊格式（known_at）只給測試相容用。"""
+    if "known_at" in e:
+        return e["known_at"]
+    t = [x for x in ((e.get("ann"), e.get("seen")) if forward else (e.get("ann"),)) if x is not None]
+    return min(t) if t else None
+
+
 def classify_actions(code, entry, exit_date, decision_at, actions, forward, gap):
     """回傳 (狀態, 事件 ID 清單, 是否持有期內有除息)。狀態：None／skip_known／announce_unknown／unresolved／proxy。"""
-    covered = actions is not None and all(m in actions["covered"] for m in months_between(entry, exit_date))
+    covered = covered_through(actions, entry, exit_date, forward)
     if not covered:
         if forward:
             return "unresolved", ["no_coverage"], False
@@ -230,9 +288,10 @@ def classify_actions(code, entry, exit_date, decision_at, actions, forward, gap)
     worst, ids = None, [e["id"] for e in hit]
     rank = {"skip_known": 0, "announce_unknown": 1, "unresolved": 2}
     for e in hit:
-        if e["known_at"] is not None and e["known_at"] <= decision_at:
+        k = known_time(e, forward)
+        if k is not None and k <= decision_at:
             s = "skip_known"
-        elif e["known_at"] is not None:
+        elif k is not None:
             s = "unresolved"
         else:
             s = "unresolved" if forward else "announce_unknown"
@@ -241,9 +300,15 @@ def classify_actions(code, entry, exit_date, decision_at, actions, forward, gap)
 
 
 # ---------- 前瞻：快照與決策紀錄 ----------
+def snapshot_window(ym):
+    """P3：正式共同快照的 cutoff 必須在 M+1 月 11 日 19:30 ～ 12 日 09:00（台北）之間；之後才抓到的不能補成這個月的快照。"""
+    nm = ym_add(ym, 1)
+    return at_tpe("%s11" % nm, 19, 30, 0), at_tpe("%s12" % nm, 9, 0, 0)
+
+
 def load_snapshots(root, meta_root=None):
-    """data/revenue_raw/snapshots/<ym>/{panel.csv, meta.json}。meta_root（repo 裡的持久雜湊副本）有該月時雜湊也要一致。
-    回傳 ym -> dict(rev, cutoff_at, sha)。不一致、月份對不上、cutoff 早於 M+1 月 11 日 → 不收。"""
+    """data/revenue_raw/snapshots/<ym>/{panel.csv, meta.json}。回傳 ym -> dict(rev, cutoff_at, sha)。
+    P3：meta.formal 要是 true、cutoff 在正式時窗內、meta_root（repo 裡的持久 meta）必須有該月且整份相同；否則不收。"""
     out = {}
     if not os.path.isdir(root):
         return out
@@ -259,30 +324,83 @@ def load_snapshots(root, meta_root=None):
         if meta.get("revenue_month") != ym or sha != meta.get("panel_sha256") or cut is None:
             print("快照 %s 月份、雜湊或時間不對，不用" % ym)
             continue
-        if cut < at_tpe("%s11" % ym_add(ym, 1), 0, 0, 0):
-            print("快照 %s 的 cutoff 早於 M+1 月 11 日，不用" % ym)
+        lo, hi = snapshot_window(ym)
+        if not (lo <= cut < hi) or meta.get("formal") is not True:
+            print("快照 %s 不是正式時窗（M+1 月 11 日 19:30～12 日 09:00）內的正式快照，不用" % ym)
             continue
-        if meta_root:
-            pm = os.path.join(meta_root, ym + ".json")
-            if os.path.exists(pm) and json.load(open(pm, encoding="utf-8")).get("panel_sha256") != sha:
-                print("快照 %s 跟 repo 裡的持久雜湊不一致，不用" % ym)
-                continue
+        pm = os.path.join(meta_root, ym + ".json") if meta_root else None
+        try:
+            same = pm is not None and json.load(open(pm, encoding="utf-8")) == meta
+        except (OSError, ValueError):
+            same = False
+        if not same:
+            print("快照 %s 沒有 repo 持久 meta 或內容不同（月份、cutoff、來源），不用" % ym)
+            continue
         out[ym] = dict(rev=load_rev(pp), cutoff_at=cut, sha=sha)
     return out
 
 
 def load_decisions(root=DECISIONS):
-    out = {}
+    """(營收月, 版本) -> 正式決策紀錄清單（依 decision_at 排序）。attempts/ 底下的嘗試紀錄不讀。"""
+    out = defaultdict(list)
     for p in sorted(glob.glob(os.path.join(root, "*.json"))):
         try:
             d = json.load(open(p, encoding="utf-8"))
+            d["_path"] = p
             d["_decision_at"] = parse_time(d["decision_at"])
+            d["_completed_at"] = parse_time(d.get("calculation_completed_at"))
             if d["_decision_at"] is None:
                 continue
-            out[(d["revenue_month"], int(d["version"]))] = d
+            out[(d["revenue_month"], int(d["version"]))].append(d)
         except (OSError, ValueError, KeyError):
             continue
-    return out
+    for k in out:
+        out[k].sort(key=lambda d: d["_decision_at"])
+    return dict(out)
+
+
+def _as_list(x):
+    return x if isinstance(x, list) else [x]
+
+
+def rows_sha(px, codes, S):
+    """母體在價量基準日 S 的價量列雜湊（決策後價量被修訂可以查出來）。"""
+    h = hashlib.sha256()
+    for c in sorted(codes):
+        h.update(("%s,%s,%r\n" % (c, S, tuple(px.get(c, {}).get(S, ())))).encode())
+    return h.hexdigest()
+
+
+def pick_decision(recs, ym, version, sn, days, didx):
+    """P1：從紀錄裡挑最早一份「實際可執行」的。回傳 (紀錄, E, S, 狀態)。
+    驗：快照雜湊、登記雜湊、decision_at ≥ 快照 cutoff、算完 ≤ decision_at < 實際進場開盤、
+    實際進場日＝紀錄的預定進場日、價量基準日＝實際進場前一交易日。"""
+    if not recs:
+        return None, None, None, "missing_decision"
+    lower, inc = nominal_first(ym, version)
+    last = "missing_decision"
+    for d in recs:
+        dec, done = d["_decision_at"], d.get("_completed_at")
+        if d.get("snapshot_sha256") != sn["sha"] or d.get("revenue_month") != ym or int(d.get("version", 0)) != version:
+            last = "decision_snapshot_mismatch"
+            continue
+        if d.get("registration_sha256", REGISTRATION_SHA256) != REGISTRATION_SHA256:
+            last = "decision_invalid"
+            continue
+        if dec < sn["cutoff_at"] or done is None or done > dec:
+            last = "decision_invalid"
+            continue
+        E = entry_after(days, lower, inc, dec)
+        if E is None:
+            last = "immature" if d.get("planned_entry", "") > (days[-1] if days else "") else "decision_stale"
+            continue
+        S = days[didx[E] - 1]
+        if not (dec < open_at(E)) or d.get("planned_entry") != E or S != d.get("liquidity_asof_date") or \
+                S != d.get("price_asof_date"):
+            last = "decision_stale"          # 實際進場不是當時預定的那天（臨時休市、延誤）→ 這份不能用
+            continue
+        return d, E, S, "ok"
+    return None, None, None, last
 
 
 def groups_for(px, rev, S, ym, sens_trim=False):
@@ -336,30 +454,21 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
                 months[ym] = rec
                 continue
             sn = snaps[ym]
-            d = (decisions or {}).get((ym, version))
+            d, E, S, why_d = pick_decision(_as_list((decisions or {}).get((ym, version), [])), ym, version, sn, days, didx)
             if d is None:
-                rec["status"] = "missing_decision"
+                rec["status"] = why_d
                 months[ym] = rec
                 continue
-            if d.get("snapshot_sha256") != sn["sha"]:
-                rec["status"] = "decision_snapshot_mismatch"
-                months[ym] = rec
-                continue
-            lower, inc = nominal_first(ym, version)
             dec = d["_decision_at"]
-            E = entry_after(days, lower, inc, dec)
-            if E is None:
-                rec["status"] = "immature"
-                months[ym] = rec
-                continue
-            S = days[didx[E] - 1]
-            if S != d.get("liquidity_asof_date"):
-                rec["status"] = "decision_stale"          # 實際進場日的前一交易日不是當時用的價量基準日
-                months[ym] = rec
-                continue
             rv = sn["rev"]
             rec.update(snapshot_sha=sn["sha"], delay=d.get("delay_reason"))
-            g_rec = {c: int(v) for c, v in d.get("groups", {}).items()}
+            rec_sus = {c: float(z) for c, z in (d.get("sus") or {}).items()}
+            if sens_trim:                                   # P6：用當時的 SUS 值排除極端值後重新分組
+                pool_t = {c: z for c, z in rec_sus.items() if abs(z) <= 10}
+                g_rec = quintiles(list(pool_t.items())) if pool_t else {}
+            else:
+                g_rec = {c: int(v) for c, v in d.get("groups", {}).items()}
+            rec_universe = list((d.get("universe") or {}).keys())
         else:
             he = historical_entry(ym, version, days)
             if he is None:
@@ -367,10 +476,16 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
                 months[ym] = rec
                 continue
             dec, S, E = he
-            rv, g_rec = rev, None
+            rv, g_rec, rec_universe = rev, None, None
         rec.update(E=E, S=S, decision_at=dec.isoformat())
         ei = didx[E]
         cand, sus, why, bad = groups_for(px, rv, S, ym, sens_trim)
+        if rec_universe is not None:                       # P1b：前瞻用當時保存的完整母體；重算不同只另報
+            if set(cand) != set(rec_universe):
+                rec["universe_recompute_mismatch"] = True
+            if d.get("universe_rows_sha256") and rows_sha(px, rec_universe, S) != d["universe_rows_sha256"]:
+                rec["price_revised_after_decision"] = True
+            cand, why, bad = rec_universe, d.get("why", {}), list(d.get("turnover_not_finite", []))
         rec.update(n_cand=len(cand), why=why)
         if bad:
             rec["data_error"] += ["turnover_not_finite:%s" % c for c in bad]
@@ -378,17 +493,21 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
             g_now = quintiles(list(sus.items())) if sus else {}
             if g_now != g_rec:
                 rec["group_recompute_mismatch"] = True    # 只報告；前瞻一律用當時記下的名單
+        last_needed = days[min(ei + max(HS) - 1, len(days) - 1)]
+        qc = [c for c in cand if any(S <= q <= last_needed for q in PRICE_QC.get(c, ()))]
+        if qc:
+            rec["data_error"] += ["price_qc:%s" % c for c in qc]       # P6：短列、重複日期
         trade = {}
         for c in cand:
-            rows = px[c]
+            rows = px.get(c, {})
             r = rows.get(E)
             if r is None or not (fin(r[0]) and r[0] > 0):
-                if r is not None and not fin(r[0]):
-                    rec["data_error"].append("entry_open_not_finite:%s" % c)
+                if r is not None:
+                    rec["data_error"].append("entry_open_bad:%s" % c)      # nan、inf、≤ 0 都是資料錯誤，不當停牌
                 rec["untradable"] += 1
                 continue
             o = r[0]
-            ds = dts[c]
+            ds = dts.get(c) or sorted(rows)
             i = bisect.bisect_left(ds, E)
             fw = {}
             for h in HS:
@@ -401,11 +520,11 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
                 if j >= len(ds):
                     hh["no_exit"] += 1
                     rec["trades"].append(dict(code=c, h=h, entry=E, planned_exit=tgt, actual_exit=None,
-                                              last_price_date=ds[-1], status="no_exit"))
+                                              last_price_date=ds[-1], last_close=rows[ds[-1]][1], status="no_exit"))
                     continue
                 X = ds[j]
                 path = [rows[ds[q]] for q in range(i, j + 1)]
-                if not all(fin(p[0], p[1]) for p in path) or not path[-1][1] > 0:
+                if not all(fin(p[0], p[1]) and p[0] > 0 and p[1] > 0 for p in path):
                     hh["data_error"] += 1
                     rec["trades"].append(dict(code=c, h=h, entry=E, planned_exit=tgt, actual_exit=X, status="data_error"))
                     continue
@@ -493,8 +612,9 @@ def judge(m11, m16, yms_common, h=MAIN_H):
 def study(px, rev, actions=None, forward_first=FORWARD_FIRST_YM, snaps=None, decisions=None, official_days=None):
     days, cal_src = build_calendar(px, official_days)
     out = dict(program=PROGRAM, registration_sha256=REGISTRATION_SHA256, pit_verified_history=False, calendar=cal_src,
-               ca_source="corporate_actions（覆蓋 %d 個月）" % len(actions["covered"]) if actions else "暫代（開盤跳超過 11%）",
-               segments={})
+               ca_source=("corporate_actions（覆蓋 %d 個月）" % len(actions["covered"]) if actions.get("ok", True) else
+                          "事件表不可用（%s）→ 歷史暫代、前瞻未解" % actions.get("why")) if actions else "暫代（開盤跳超過 11%）",
+               price_qc_codes=len(PRICE_QC), segments={})
     kw = dict(snaps=snaps, decisions=decisions, forward_first=forward_first)
     m = {v: run_version(px, rev, days, v, actions, **kw) for v in (11, 16)}
     mt = {v: run_version(px, rev, days, v, actions, sens_trim=True, **kw) for v in (11, 16)}
@@ -539,6 +659,8 @@ def study(px, rev, actions=None, forward_first=FORWARD_FIRST_YM, snaps=None, dec
         E=r["E"], S=r["S"], decision_at=r["decision_at"], forward=r["forward"], status=r["status"], delay=r["delay"],
         snapshot_sha=r["snapshot_sha"], n_cand=r["n_cand"], n_qual=r["n_qual"], why=r["why"], untradable=r["untradable"],
         data_error=r["data_error"][:20], group_recompute_mismatch=r.get("group_recompute_mismatch", False),
+        universe_recompute_mismatch=r.get("universe_recompute_mismatch", False),
+        price_revised_after_decision=r.get("price_revised_after_decision", False),
         h={str(h): dict(no_exit=r["h"][h]["no_exit"], data_error=r["h"][h]["data_error"], unresolved=r["h"][h]["unresolved"],
                         ca=dict(r["h"][h]["ca"])) for h in HS},
         valid=month_valid(r)) for ym, r in m[v].items()} for v in (11, 16)}
@@ -548,38 +670,67 @@ def study(px, rev, actions=None, forward_first=FORWARD_FIRST_YM, snaps=None, dec
 
 
 # ---------- 前瞻決策（每晚跑；寫下當時的名單與時間）----------
-def decide(px, snaps, days, next_day, now, root=DECISIONS, forward_first=FORWARD_FIRST_YM):
-    """now：台北時間（aware）。days：到最新價量日為止的官方市場日；next_day：最新價量日之後的下一個市場日（官方休市表）。
-    對每個有快照、還沒有決策紀錄的前瞻營收月與版本：若 next_day 符合該版名義下限，就以最新價量日 S 當基準算分組、寫紀錄。
-    紀錄一旦寫下就不改（已存在就跳過）。回傳新寫的檔名。"""
+def _now():
+    return dt.datetime.now(TPE)
+
+
+def _procedure_sha():
+    try:
+        return _sha_file(os.path.abspath(__file__))
+    except OSError:
+        return None
+
+
+def decide(px, snaps, days, next_day, clock=_now, root=DECISIONS, forward_first=FORWARD_FIRST_YM, calendar_sha=None):
+    """每晚跑。days：到最新價量日為止的官方市場日；next_day：之後的下一個官方市場日。clock：回傳台北時間的函式。
+    對每個有正式快照的前瞻營收月與版本：next_day 符合名義下限、還沒有「預定 next_day」或「預定日已是市場日（已執行）」的紀錄時，
+    以最新價量日 S 當基準算分組。P1a：算完重新讀時鐘當 decision_at；已過 next_day 開盤 → 只寫 attempts/ 嘗試紀錄。
+    紀錄一旦寫下就不改；臨時休市讓預定日沒開市時，下一晚另寫一份（檔名帶時間），舊的保留。回傳新寫的正式紀錄檔名。"""
     os.makedirs(root, exist_ok=True)
     S = days[-1]
+    dayset = set(days)
+    existing = load_decisions(root)
     written = []
     for ym, sn in sorted(snaps.items()):
-        if ym < forward_first or sn["cutoff_at"] >= now:
+        started = clock()
+        if ym < forward_first or sn["cutoff_at"] >= started:
             continue
         for v in (11, 16):
-            p = os.path.join(root, "%s_v%d.json" % (ym, v))
-            if os.path.exists(p):
-                continue
+            prev = existing.get((ym, v), [])
+            if any(d.get("planned_entry") == next_day or d.get("planned_entry") in dayset for d in prev):
+                continue                                    # 已有同一預定日的紀錄，或之前的預定日已開市（已執行）
             lower, inc = nominal_first(ym, v)
             if not (next_day >= lower if inc else next_day > lower):
                 continue
-            if open_at(next_day) <= now:
+            started = clock()
+            if open_at(next_day) <= started:
                 continue
             first_ok = next(d for d in days + [next_day] if (d >= lower if inc else d > lower))
             cand, sus, why, bad = groups_for(px, sn["rev"], S, ym)
             g = quintiles(list(sus.items())) if sus else {}
-            rec = dict(revenue_month=ym, version=v, program=PROGRAM, snapshot_sha256=sn["sha"],
-                       revenue_cutoff_at=sn["cutoff_at"].isoformat(), price_asof_date=S, liquidity_asof_date=S,
-                       calculation_completed_at=now.isoformat(), decision_at=now.isoformat(), planned_entry=next_day,
-                       nominal_first_entry=first_ok, delay_reason=None if first_ok == next_day else "排程或資料延誤：名義最早 %s" % first_ok,
+            rec = dict(revenue_month=ym, version=v, program=PROGRAM, registration_sha256=REGISTRATION_SHA256,
+                       procedure_sha256=_procedure_sha(), snapshot_sha256=sn["sha"], revenue_cutoff_at=sn["cutoff_at"].isoformat(),
+                       price_asof_date=S, liquidity_asof_date=S, calendar_sha256=calendar_sha,
+                       calculation_started_at=started.isoformat(), planned_entry=next_day, nominal_first_entry=first_ok,
+                       delay_reason=None if first_ok == next_day else "排程、資料延誤或臨時休市：名義最早 %s" % first_ok,
                        n_universe=len(cand), n_qualified=len(sus), why=why, turnover_not_finite=bad,
-                       groups={c: g[c] for c in sorted(g)})
+                       universe={c: px[c][S][3] for c in sorted(cand)}, universe_rows_sha256=rows_sha(px, cand, S),
+                       sus={c: sus[c] for c in sorted(sus)}, groups={c: g[c] for c in sorted(g)},
+                       superseded_attempts=[os.path.basename(d.get("_path", "")) for d in prev])
+            done = clock()                                  # P1a：算完才讀的時間
+            rec["calculation_completed_at"] = rec["decision_at"] = done.isoformat()
+            stamp = done.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            if open_at(next_day) <= done:
+                rec["status"] = "late_after_open"
+                p = os.path.join(root, "attempts", "%s_v%d_%s.json" % (ym, v, stamp))
+            else:
+                p = os.path.join(root, "%s_v%d_%s.json" % (ym, v, stamp))
+            os.makedirs(os.path.dirname(p), exist_ok=True)
             tmp = p + ".tmp"
             json.dump(rec, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
             os.replace(tmp, p)
-            written.append(p)
+            if rec.get("status") != "late_after_open":
+                written.append(p)
     return written
 
 
@@ -587,13 +738,19 @@ def decide(px, snaps, days, next_day, now, root=DECISIONS, forward_first=FORWARD
 def load_prices(root=os.path.join("data", "stock")):
     """code -> {date: (open, close, lot, wan)}；讀不成數字的列記成 nan（不默默丟掉，讓後面標 data_error）。"""
     px = {}
+    PRICE_QC.clear()
     for f in glob.glob(os.path.join(root, "*.txt")):
         rows = {}
+        code = os.path.basename(f)[:-4]
         for l in open(f, encoding="utf-8"):
             if l[0] == "#" or not l.strip():
                 continue
             p = l.strip().split(",")
             if len(p) < 7:
+                PRICE_QC[code].add(p[0])                 # P6：短列不默默丟，記 QC（該日期落在持有期就是資料錯誤）
+                continue
+            if p[0] in rows:
+                PRICE_QC[code].add(p[0])                 # 重複日期：保留第一筆、記 QC
                 continue
 
             def num(x):
@@ -617,15 +774,30 @@ def load_rev(panel_path):
     return rev
 
 
-def load_official_calendar(path=os.path.join("data", "market_calendar.json")):
+def load_official_calendar(path=os.path.join("data", "market_calendar.json"), with_meta=False):
     if not os.path.exists(path):
-        return None, None
+        return (None, None, None) if with_meta else (None, None)
     j = json.load(open(path, encoding="utf-8"))
-    return sorted(j.get("trading_days", [])), sorted(j.get("holidays", []))
+    out = sorted(j.get("trading_days", [])), sorted(set(j.get("holidays", [])) | set(j.get("closures", [])))
+    if with_meta:
+        return out + (dict(built_at=parse_time(j.get("built_at", "")), schedule_years=j.get("schedule_years", []),
+                           sha=_sha_file(path)),)
+    return out
+
+
+def calendar_usable(meta, next_day, now):
+    """P4：前瞻決策只在官方日曆新鮮、而且涵蓋下一個市場日的年度時才可用。回傳 (可用, 原因)。"""
+    if not meta or meta.get("built_at") is None:
+        return False, "官方日曆不存在或沒有建置時間"
+    if now - meta["built_at"] > dt.timedelta(hours=CAL_MAX_AGE_H):
+        return False, "官方日曆超過 %d 小時沒有更新" % CAL_MAX_AGE_H
+    if next_day[:4] not in meta.get("schedule_years", []):
+        return False, "官方休市表沒有涵蓋 %s 年" % next_day[:4]
+    return True, ""
 
 
 def next_market_day(after, holidays):
-    """after 之後的下一個市場日：跳過週末與官方休市日（休市表沒有的日期當開市）。"""
+    """after 之後的下一個市場日：跳過週末、官方休市日與已核實的臨時休市（呼叫端要先確認日曆可用，見 calendar_usable）。"""
     d = dt.date(int(after[:4]), int(after[4:6]), int(after[6:8])) + dt.timedelta(days=1)
     hs = set(holidays or [])
     while d.weekday() >= 5 or d.strftime("%Y%m%d") in hs:
@@ -668,19 +840,20 @@ def report(res):
     L += ["", "兩版共同有效以外的營收月 %d 個。" % len(res["excluded_common"])]
     for v, ms in res["months_by_version"].items():
         L += ["", "## 各營收月覆蓋（%s）" % v,
-              "| 營收月 | 決策 | 進場 | 狀態 | 母體 | 分組 | 當月無營收 | 37 月不齊 | 不可成交 | 20 日 無法出場／資料錯誤／未解 | 公司行動（20 日）| 延誤 |",
+              "| 營收月 | 決策 | 進場 | 狀態 | 母體 | 分組 | 完全沒有營收／當月無營收 | 37 月不齊 | 不可成交 | 20 日 無法出場／資料錯誤／未解 | 公司行動（20 日）| 延誤 |",
               "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for ym, r in sorted(ms.items()):
             h = r["h"][str(MAIN_H)]
-            L.append("| %s | %s | %s | %s%s | %s | %s | %s | %s | %s | %s／%s／%s | %s | %s |" % (
+            L.append("| %s | %s | %s | %s%s | %s | %s | %s／%s | %s | %s | %s／%s／%s | %s | %s |" % (
                 ym, (r["decision_at"] or "")[:16], r["E"], r["status"], "（資料錯誤）" if r["data_error"] else "",
-                r["n_cand"], r["n_qual"], r["why"].get("no_current_month", 0), r["why"].get("missing_history_month", 0),
+                r["n_cand"], r["n_qual"], r["why"].get("no_revenue", 0), r["why"].get("no_current_month", 0),
+                r["why"].get("missing_history_month", 0),
                 r["untradable"], h["no_exit"], h["data_error"], h["unresolved"], h["ca"] or "", r["delay"] or ""))
     return "\n".join(L) + "\n"
 
 
 def write_trades(res, path="sus_trades.csv"):
-    cols = ["version", "ym", "code", "group", "h", "entry", "planned_exit", "actual_exit", "last_price_date", "ret",
+    cols = ["version", "ym", "code", "group", "h", "entry", "planned_exit", "actual_exit", "last_price_date", "last_close", "ret",
             "status", "events", "cash_div"]
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
@@ -693,16 +866,21 @@ def write_trades(res, path="sus_trades.csv"):
 
 
 def main(args):
-    official, holidays = load_official_calendar()
+    official, holidays, calmeta = load_official_calendar(with_meta=True)
     px = load_prices()
     snaps = load_snapshots(os.path.join("data", "revenue_raw", "snapshots"), os.path.join("data", "revenue_snapshots_meta"))
     if "--decide" in args:
-        days, _src = build_calendar(px, official)
+        if not official:
+            print("::error::SUS 決策：沒有官方市場日曆，不寫決策（不用過半股價推算）")
+            sys.exit(2)
         last = max(max(rows) for rows in px.values())
-        days = [d for d in days if d <= last]
+        days = [d for d in official if d <= last]
         nd = next_market_day(days[-1], holidays)
-        now = dt.datetime.now(TPE)
-        w = decide(px, snaps, days, nd, now)
+        ok, why = calendar_usable(calmeta, nd, _now())
+        if not ok:
+            print("::error::SUS 決策：%s，不寫決策" % why)
+            sys.exit(2)
+        w = decide(px, snaps, days, nd, calendar_sha=calmeta["sha"])
         print("::notice::SUS 決策：價量基準日 %s、下一個市場日 %s；新寫 %d 份紀錄 %s" % (days[-1], nd, len(w), w))
         return
     import revenue_panel
