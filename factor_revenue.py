@@ -228,6 +228,9 @@ def fmt(x):
         x["raw"], x["med"], x["net"], x["win"])
 
 
+CAVEAT = '⚠ **存活選樣限制**（SUS 登記 v2.5 第 10 節，2026-10-25）：歷史營收是 2026-10 重新下載的版本，已下市、合併、改碼的公司多半不在檔內；長期股價也只回補現存代號。下面的「通過」意思是「在本次可取得樣本與既定門檻下符合條件」，歷史母體存在缺碼／存活選樣及資料版本限制，尚未完成完整歷史市場母體驗證，不據此宣稱全市場普遍有效。原數字保留；資料修復後另出重算版比較。'
+
+
 if __name__ == "__main__":
     if not os.path.exists(PANEL):
         print("沒有 %s，先跑 revenue_fetch.py" % PANEL); sys.exit(1)
@@ -235,7 +238,8 @@ if __name__ == "__main__":
     json.dump(res, open("revenue_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     L = ["# 月營收因子測試（探索，資料是現在查得到的版本）", "",
          "事先登記：研究_免費資料因子 第 5 節。主要看 %d 天；探索 %s～%s、驗證 %s～%s（進場日）。" % (
-             MAIN_H, EXPLORE[0], EXPLORE[1], VALIDATE[0], VALIDATE[1]), ""]
+             MAIN_H, EXPLORE[0], EXPLORE[1], VALIDATE[0], VALIDATE[1]), "",
+         CAVEAT, ""]
     m = res["main"]
     L.append("事件 %d 筆、%d 個進場日（%s～%s）。" % (m["n_events"], m["entry_dates"], m["first"], m["last"]))
     for key, c in m["cells"].items():
