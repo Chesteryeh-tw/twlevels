@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""SUS（標準化未預期營收）研究程式 v3。照 preregistration/SUS_事先登記_v2.4.md（SHA-256 8ffa6f31…78d8）實作，不加研究規則。
+"""SUS（標準化未預期營收）研究程式 v4。照 preregistration/SUS_事先登記_v2.5.md（SHA-256 5b9f1cf5…6e14）實作，不加研究規則。
+
+v4（GPT 09）：前瞻月當時母體的代碼缺整份價量、缺進場日或預定出場日價格列 → 未解資料（unresolved_data），月不進判定；
+只有價格列存在且成交量 0（官方零成交證據）才算不可成交。日曆新鮮度改看必要來源成功核驗時間（sources_verified_at），
+不看重建時間；決策紀錄另存日曆來源核驗時間。登記改用 v2.5（第 10、11 節）。
 
 v1（commit 4904407）、v2（efdeb3d）經 GPT 2026-10-25 複核（06、08）不通過實作驗收；v3 修 08 的 P1～P6，凍結紀錄另記
 （SUS_程式凍結紀錄_v3）。公式、成本、門檻、判定都沒有改。
@@ -55,9 +59,9 @@ import statistics as st
 import sys
 from collections import defaultdict
 
-PROGRAM = "sus_study v3"
-REGISTRATION = "preregistration/SUS_事先登記_v2.4.md"
-REGISTRATION_SHA256 = "8ffa6f3121ff31733c6f2f7685fa9beb14e64ce71311cdad4d832db40d3a78d8"
+PROGRAM = "sus_study v4"
+REGISTRATION = "preregistration/SUS_事先登記_v2.5.md"
+REGISTRATION_SHA256 = "5b9f1cf5b131d376b1aa0faa364b7c34c0c6f20c7692a8bce72ea03d42af6e14"
 FORWARD_FIRST_YM = "202610"
 COST = 0.386
 HS = (5, 20, 60)
@@ -70,6 +74,7 @@ NW_LAG = {5: 1, 20: 1, 60: 2}
 TPE = dt.timezone(dt.timedelta(hours=8))
 DECISIONS = os.path.join("data", "sus_decisions")
 CAL_MAX_AGE_H = 36
+CAL_REQUIRED = ("FMTQIK_current", "holidaySchedule")
 PRICE_QC = defaultdict(set)      # code -> 有問題的日期（短列、重複日期）；load_prices 填
 
 
@@ -446,7 +451,7 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
     for ym in yms:
         forward = ym >= forward_first
         rec = dict(status="ok", E=None, S=None, decision_at=None, forward=forward, n_cand=0, n_qual=0, why={},
-                   untradable=0, data_error=[], h={h: dict(no_exit=0, ca=defaultdict(int), unresolved=0, data_error=0)
+                   untradable=0, unresolved_data=[], data_error=[], h={h: dict(no_exit=0, ca=defaultdict(int), unresolved=0, data_error=0)
                                                     for h in HS}, trades=[], snapshot_sha=None, delay=None)
         if forward:
             if snaps is None or ym not in snaps:
@@ -501,6 +506,14 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
         for c in cand:
             rows = px.get(c, {})
             r = rows.get(E)
+            if r is None and forward:
+                # GPT 09 4.1：當時母體裡的代碼，進場日沒有價格列 ≠ 已證明沒成交（可能是來源缺檔、回補漏掉、後來退出清單）。
+                # 只有官方無成交證據（價格列存在且成交量為 0）才走不可成交；否則未解資料、該月不進正式判定。
+                rec["unresolved_data"].append(("missing_price_input:%s" if not rows else "missing_entry_row:%s") % c)
+                continue
+            if r is not None and fin(r[2]) and r[2] == 0:
+                rec["untradable"] += 1                                      # 官方零成交（有證據的不可成交）
+                continue
             if r is None or not (fin(r[0]) and r[0] > 0):
                 if r is not None:
                     rec["data_error"].append("entry_open_bad:%s" % c)      # nan、inf、≤ 0 都是資料錯誤，不當停牌
@@ -523,6 +536,12 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
                                               last_price_date=ds[-1], last_close=rows[ds[-1]][1], status="no_exit"))
                     continue
                 X = ds[j]
+                if forward and X != tgt:
+                    # 前瞻：預定出場日沒有價格列，沒有官方停牌／零成交證據 → 未解（不自動當停牌順延）
+                    hh["unresolved"] += 1
+                    rec["trades"].append(dict(code=c, h=h, entry=E, planned_exit=tgt, actual_exit=None,
+                                              last_price_date=ds[j - 1] if j > 0 else None, status="missing_exit_row"))
+                    continue
                 path = [rows[ds[q]] for q in range(i, j + 1)]
                 if not all(fin(p[0], p[1]) and p[0] > 0 and p[1] > 0 for p in path):
                     hh["data_error"] += 1
@@ -574,7 +593,7 @@ def run_version(px, rev, days, version, actions=None, sens_trim=False, snaps=Non
 
 def month_valid(rec, h=MAIN_H):
     """該月可進判定：分組成立、該持有期成熟，沒有資料錯誤、無法驗證出場、未解公司行動。"""
-    if rec["status"] != "ok" or rec["data_error"]:
+    if rec["status"] != "ok" or rec["data_error"] or rec.get("unresolved_data"):
         return False
     hh = rec["h"][h]
     return "q5" in hh and not (hh["no_exit"] or hh["data_error"] or hh["unresolved"])
@@ -658,6 +677,7 @@ def study(px, rev, actions=None, forward_first=FORWARD_FIRST_YM, snaps=None, dec
     out["months_by_version"] = {"v%d" % v: {ym: dict(
         E=r["E"], S=r["S"], decision_at=r["decision_at"], forward=r["forward"], status=r["status"], delay=r["delay"],
         snapshot_sha=r["snapshot_sha"], n_cand=r["n_cand"], n_qual=r["n_qual"], why=r["why"], untradable=r["untradable"],
+        unresolved_data=r.get("unresolved_data", [])[:20],
         data_error=r["data_error"][:20], group_recompute_mismatch=r.get("group_recompute_mismatch", False),
         universe_recompute_mismatch=r.get("universe_recompute_mismatch", False),
         price_revised_after_decision=r.get("price_revised_after_decision", False),
@@ -681,7 +701,8 @@ def _procedure_sha():
         return None
 
 
-def decide(px, snaps, days, next_day, clock=_now, root=DECISIONS, forward_first=FORWARD_FIRST_YM, calendar_sha=None):
+def decide(px, snaps, days, next_day, clock=_now, root=DECISIONS, forward_first=FORWARD_FIRST_YM, calendar_sha=None,
+           calendar_verified_at=None):
     """每晚跑。days：到最新價量日為止的官方市場日；next_day：之後的下一個官方市場日。clock：回傳台北時間的函式。
     對每個有正式快照的前瞻營收月與版本：next_day 符合名義下限、還沒有「預定 next_day」或「預定日已是市場日（已執行）」的紀錄時，
     以最新價量日 S 當基準算分組。P1a：算完重新讀時鐘當 decision_at；已過 next_day 開盤 → 只寫 attempts/ 嘗試紀錄。
@@ -711,6 +732,7 @@ def decide(px, snaps, days, next_day, clock=_now, root=DECISIONS, forward_first=
             rec = dict(revenue_month=ym, version=v, program=PROGRAM, registration_sha256=REGISTRATION_SHA256,
                        procedure_sha256=_procedure_sha(), snapshot_sha256=sn["sha"], revenue_cutoff_at=sn["cutoff_at"].isoformat(),
                        price_asof_date=S, liquidity_asof_date=S, calendar_sha256=calendar_sha,
+                       calendar_sources_verified_at=calendar_verified_at,
                        calculation_started_at=started.isoformat(), planned_entry=next_day, nominal_first_entry=first_ok,
                        delay_reason=None if first_ok == next_day else "排程、資料延誤或臨時休市：名義最早 %s" % first_ok,
                        n_universe=len(cand), n_qualified=len(sus), why=why, turnover_not_finite=bad,
@@ -780,17 +802,23 @@ def load_official_calendar(path=os.path.join("data", "market_calendar.json"), wi
     j = json.load(open(path, encoding="utf-8"))
     out = sorted(j.get("trading_days", [])), sorted(set(j.get("holidays", [])) | set(j.get("closures", [])))
     if with_meta:
+        sv = j.get("sources_verified_at") or {}
         return out + (dict(built_at=parse_time(j.get("built_at", "")), schedule_years=j.get("schedule_years", []),
-                           sha=_sha_file(path)),)
+                           verified={k: parse_time(sv.get(k, "")) for k in CAL_REQUIRED}, sha=_sha_file(path)),)
     return out
 
 
 def calendar_usable(meta, next_day, now):
     """P4：前瞻決策只在官方日曆新鮮、而且涵蓋下一個市場日的年度時才可用。回傳 (可用, 原因)。"""
-    if not meta or meta.get("built_at") is None:
-        return False, "官方日曆不存在或沒有建置時間"
-    if now - meta["built_at"] > dt.timedelta(hours=CAL_MAX_AGE_H):
-        return False, "官方日曆超過 %d 小時沒有更新" % CAL_MAX_AGE_H
+    if not meta:
+        return False, "官方日曆不存在"
+    ver = meta.get("verified") or {}
+    for k in CAL_REQUIRED:                     # GPT 09 4.2：看來源成功核驗時間，不看重建時間（built_at）
+        t = ver.get(k)
+        if t is None:
+            return False, "官方日曆來源 %s 沒有成功核驗紀錄" % k
+        if now - t > dt.timedelta(hours=CAL_MAX_AGE_H):
+            return False, "官方日曆來源 %s 超過 %d 小時沒有成功更新（重建不算）" % (k, CAL_MAX_AGE_H)
     if next_day[:4] not in meta.get("schedule_years", []):
         return False, "官方休市表沒有涵蓋 %s 年" % next_day[:4]
     return True, ""
@@ -818,7 +846,7 @@ def fmt(s):
 
 
 def report(res):
-    L = ["# SUS 研究報告（%s；登記 v2.4 SHA-256 %s…）" % (res["program"], res["registration_sha256"][:8]), "",
+    L = ["# SUS 研究報告（%s；登記 v2.5 SHA-256 %s…）" % (res["program"], res["registration_sha256"][:8]), "",
          "市場日曆：%s。公司行動：%s。歷史月資料是現在查得到的版本（pit_verified＝false），一律「探索」；"
          "前瞻月（營收月 ≥ %s）只在共同有效月累積到 12、24、36 個時正式檢視。" % (res["calendar"], res["ca_source"], FORWARD_FIRST_YM),
          "對照組＝進場前一交易日成交金額 ≥ 1 億的全部代號（含 ETF 等，與 R1～R5 相同）。"]
@@ -880,7 +908,8 @@ def main(args):
         if not ok:
             print("::error::SUS 決策：%s，不寫決策" % why)
             sys.exit(2)
-        w = decide(px, snaps, days, nd, calendar_sha=calmeta["sha"])
+        w = decide(px, snaps, days, nd, calendar_sha=calmeta["sha"],
+                   calendar_verified_at={k: v.isoformat() for k, v in calmeta["verified"].items()})
         print("::notice::SUS 決策：價量基準日 %s、下一個市場日 %s；新寫 %d 份紀錄 %s" % (days[-1], nd, len(w), w))
         return
     import revenue_panel

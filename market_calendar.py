@@ -17,6 +17,19 @@ import datetime as dt, gzip, hashlib, json, os, random, sys, time, urllib.error,
 RAW = os.path.join("data", "cal_raw")
 OUT = os.path.join("data", "market_calendar.json")
 CLOSURES = os.path.join("data", "market_closures.json")
+VERIFIED = os.path.join(RAW, "verified.json")     # 各必要來源最後一次「成功抓到並解析」的時間（GPT 09 4.2）
+
+
+def _utcnow():
+    return dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def mark_verified(key, extra=None):
+    v = json.load(open(VERIFIED, encoding="utf-8")) if os.path.exists(VERIFIED) else {}
+    v[key] = dict(at=_utcnow(), **(extra or {}))
+    tmp = VERIFIED + ".tmp"
+    json.dump(v, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    os.replace(tmp, VERIFIED)
 START = (2020, 1)
 UA = "twlevels-research (official market calendar; monthly, 4-7s apart)"
 STOP = {401, 403, 407, 429, 451}
@@ -87,11 +100,14 @@ def fetch(refresh_only=False, today=None):
             raise Stop("FMTQIK %s stat=%s" % (ym, j.get("stat")))
         with gzip.open(p, "wb") as f:
             f.write(b)
+        if ym == cur:
+            mark_verified("FMTQIK_current", dict(month=ym))
     time.sleep(random.uniform(4, 7))
     b = get("https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule")
     json.loads(b.decode("utf-8-sig"))
     with gzip.open(os.path.join(RAW, "holidaySchedule.json.gz"), "wb") as f:
         f.write(b)
+    mark_verified("holidaySchedule")
 
 
 def build():
@@ -134,7 +150,10 @@ def build():
     conflict = sorted(d for d in hol if d in trading)
     out = dict(trading_days=sorted(trading), holidays=sorted(hol), closures=sorted(closures - reopen),
                closure_sources=cl_src, schedule_years=years, schedule_trading_marked=sorted(trade_marked),
-               conflicts_with_fmtqik=conflict, sources=src, built_at=dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+               conflicts_with_fmtqik=conflict, sources=src, built_at=_utcnow(),
+               sources_verified_at={k: v.get("at") for k, v in (json.load(open(VERIFIED, encoding="utf-8"))
+                                                                  if os.path.exists(VERIFIED) else {}).items()},
+               note="built_at 只是重建時間；新鮮度看 sources_verified_at（必要來源最後一次成功抓到的時間）")
     tmp = OUT + ".tmp"
     json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=0)
     os.replace(tmp, OUT)

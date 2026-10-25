@@ -39,9 +39,15 @@ jobs:
           key: cal-raw-
           restore-keys: |
             cal-raw-
+      # GPT 09 4.2：日曆更新失敗就停在這一步，不寫正式決策（保留既有日曆與錯誤訊息供診斷）
       - name: 更新官方市場日曆（只重抓當月與休市日表）
-        continue-on-error: true
         run: python market_calendar.py --refresh
+      - name: 存市場日曆快取（含來源核驗時間）
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/cal_raw
+          key: cal-raw-${{ github.run_id }}
       - name: 寫決策紀錄（日曆缺、超過 36 小時沒更新或年度沒涵蓋 → 不寫並標紅）
         run: python sus_study.py --decide
       - name: 推回決策紀錄

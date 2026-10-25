@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sus_study.py v3 的合成資料測試（不讀真資料）。照 SUS 事先登記 v2.4 與 GPT 06（A1～A4、B）、08（P1～P6）檢查。"""
+"""sus_study.py v4 的合成資料測試（不讀真資料）。照 SUS 事先登記 v2.4 與 GPT 06（A1～A4、B）、08（P1～P6）檢查。"""
 import datetime as dt, json, math, os, random, statistics as st, sys, tempfile, hashlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sus_study as S
@@ -351,7 +351,8 @@ check("P4d 同一預定日已有紀錄 → 不重寫", not w6)
 hol = ["20261010", "20261023", "20261025", "20261026"]
 check("P4e 合併臨時休市：10/22 之後下一個市場日＝10/27", S.next_market_day("20261022", hol) == "20261027" and
       S.next_market_day("20261022", ["20261010", "20261025", "20261026"]) == "20261023")
-cm = dict(built_at=S.parse_time("2026-10-25T01:00:00Z"), schedule_years=["2026"])
+_v = S.parse_time("2026-10-25T01:00:00Z")
+cm = dict(built_at=_v, schedule_years=["2026"], verified={"FMTQIK_current": _v, "holidaySchedule": _v})
 check("P4f 日曆新鮮且涵蓋年度 → 可用；超過 36 小時、年度沒涵蓋、沒有日曆 → 不可用",
       S.calendar_usable(cm, "20261027", S.parse_time("2026-10-25T20:00:00+08:00"))[0] and
       not S.calendar_usable(cm, "20261027", S.parse_time("2026-10-27T20:00:00+08:00"))[0] and
@@ -416,6 +417,65 @@ S.load_prices(qd)
 check("P6e 讀價量：重複日期保留第一筆並記 QC、短列記 QC", S.PRICE_QC["1234"] == {"20250101", "20250301"})
 S.PRICE_QC.clear()
 check("P6f 報告分開列「完全沒有營收」與「當月無營收」", "完全沒有營收／當月無營收" in S.report(res))
+
+# ======== GPT 09：兩個整合缺口 ========
+# 4.1 當時母體的代碼後來整份價量消失／缺進場日列 → 未解資料（不是不可成交），月不進判定
+dr9 = os.path.join(root, "dec9")
+S.decide({c: {k: v for k, v in r.items() if k <= Sd} for c, r in pxE.items()}, snaps, [d for d in days_ if d <= Sd], E, lambda: nowS,
+         root=dr9, forward_first=fwd)
+d9 = S.load_decisions(dr9)
+gone = dict(pxE); del gone["9999"]
+mg = S.run_version(gone, rev, days_, 11, A([]), snaps=snaps, decisions=d9, forward_first=fwd)[fwd]
+check("G1a 前瞻：母體代碼整份價量消失 → missing_price_input、月無效（GPT 反例：母體平均不能從 +0.33% 變 0%）",
+      not S.month_valid(mg) and any(x.startswith("missing_price_input:9999") for x in mg["unresolved_data"]) and mg["untradable"] == 0,
+      (mg["status"], mg["unresolved_data"][:3]))
+part = dict(pxE); part["9999"] = {k: v for k, v in pxE["9999"].items() if k != E}
+mp_ = S.run_version(part, rev, days_, 11, A([]), snaps=snaps, decisions=d9, forward_first=fwd)[fwd]
+check("G1b 前瞻：只缺進場日那一列（沒有官方停牌證據）→ missing_entry_row、月無效",
+      not S.month_valid(mp_) and any(x.startswith("missing_entry_row:9999") for x in mp_["unresolved_data"]))
+zero = dict(pxE); zero["9999"] = dict(pxE["9999"]); zr = zero["9999"][E]; zero["9999"][E] = (float("nan"), float("nan"), 0.0, 0.0)
+mz = S.run_version(zero, rev, days_, 11, A([]), snaps=snaps, decisions=d9, forward_first=fwd)[fwd]
+check("G1c 前瞻：官方零成交（有價格列、成交量 0）→ 不可成交、月仍有效", S.month_valid(mz) and mz["untradable"] == 1 and
+      not mz["unresolved_data"], (mz["status"], mz["unresolved_data"][:2], mz["data_error"][:2]))
+X20 = days_[ei + 19]
+ex_ = dict(pxE); ex_["9999"] = {k: v for k, v in pxE["9999"].items() if k != X20}
+mx_ = S.run_version(ex_, rev, days_, 11, A([]), snaps=snaps, decisions=d9, forward_first=fwd)[fwd]
+check("G1d 前瞻：預定出場日缺列 → 未解（不自動當停牌順延）、月無效", not S.month_valid(mx_) and mx_["h"][20]["unresolved"] >= 1)
+mh_ = S.run_version(p_s, rev, days_, 11)[ym0]
+check("G1e 歷史（探索）：進場日缺列仍照 v2.4 記不可成交", mh_["untradable"] >= 1 and not mh_["unresolved_data"])
+# 4.2 日曆：重建時間新、來源核驗舊 → 不可用；更新失敗走舊檔重建不能讓檢查通過
+now_ = S.parse_time("2026-10-27T20:00:00+08:00")
+old_v = S.parse_time("2026-10-25T01:00:00Z")
+cm2 = dict(built_at=now_, schedule_years=["2026"], verified={"FMTQIK_current": old_v, "holidaySchedule": old_v})
+check("G2a 日曆剛重建、但來源 40 多小時沒成功更新 → 不可用", not S.calendar_usable(cm2, "20261028", now_)[0])
+cm3 = dict(built_at=now_, schedule_years=["2026"], verified={"FMTQIK_current": now_, "holidaySchedule": None})
+check("G2b 必要來源缺核驗紀錄 → 不可用", not S.calendar_usable(cm3, "20261028", now_)[0])
+ct2 = tempfile.mkdtemp(); MC.RAW = os.path.join(ct2, "raw"); MC.OUT = os.path.join(ct2, "cal.json"); MC.CLOSURES = os.path.join(ct2, "cl.json")
+MC.VERIFIED = os.path.join(MC.RAW, "verified.json"); os.makedirs(MC.RAW)
+gzip.open(os.path.join(MC.RAW, "FMTQIK_202610.json.gz"), "wb").write(json.dumps(dict(stat="OK", data=[["115/10/21"], ["115/10/22"]])).encode())
+gzip.open(os.path.join(MC.RAW, "holidaySchedule.json.gz"), "wb").write(json.dumps([dict(Date="1151026", Name="補假", Description="")]).encode())
+json.dump(dict(FMTQIK_current=dict(at="2026-10-23T00:00:00Z", month="202610"), holidaySchedule=dict(at="2026-10-23T00:00:00Z")),
+          open(MC.VERIFIED, "w"))
+_real_get, _real_sleep = MC.get, MC.time.sleep
+MC.time.sleep = lambda *_: None
+def _blocked(url):
+    raise MC.Stop("HTTP 403：%s" % url)
+MC.get = _blocked
+try:
+    MC.fetch(refresh_only=True, today=dt.date(2026, 10, 27))
+    stopped = False
+except MC.Stop:
+    stopped = True
+MC.build()
+MC.get, MC.time.sleep = _real_get, _real_sleep
+_o, _h, meta2 = S.load_official_calendar(MC.OUT, with_meta=True)
+check("G2c 更新被拒 → 用舊檔重建：built_at 是新的，但來源核驗時間不變 → 決策不可用",
+      stopped and meta2["built_at"] > S.parse_time("2026-10-25T00:00:00Z") and
+      meta2["verified"]["holidaySchedule"] == S.parse_time("2026-10-23T00:00:00Z") and
+      not S.calendar_usable(meta2, "20261028", S.parse_time("2026-10-25T12:00:00+08:00") + dt.timedelta(days=2))[0])
+
+check("R1 程式引用的登記檔雜湊＝登記檔實際雜湊（v2.5）", hashlib.sha256(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+      S.REGISTRATION), "rb").read()).hexdigest() == S.REGISTRATION_SHA256)
 
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)
