@@ -6,6 +6,7 @@
 import csv, glob, io, os, sys
 from collections import Counter, defaultdict
 
+REPO_START = "20250814"
 FIVE = ["2809", "2867", "3454", "4130", "5371"]
 
 
@@ -78,24 +79,22 @@ def main():
     cls = Counter()
     rows = []
     for c in short:
-        yms = sorted(by_code.get(c, ()))
+        yms = sorted(by_code.get(c, ()), key=lambda x: tuple(int(t) for t in x.split("/")))
         rf = yms[0] if yms else ""
         if c not in mk:
             k = "不在現行市場清單（近期下市／改碼）"
-        elif not yms:
-            k = "沒有營收（多為 ETF、特別股等）"
-        elif rf <= "202101":
-            k = "營收 2021-01 以前就有、價量卻較晚才開始（可疑）"
+        elif pf[c][0] == REPO_START:
+            k = "價量從 repo 每日資料起點才有（長期歷史完全沒補到）"
         else:
-            k = "營收也較晚才開始（新上市櫃）"
+            k = "價量 2021-02 之後才開始（多為新上市櫃；未逐檔核掛牌日）"
         cls[k] += 1
         rows.append((k, c, mk.get(c, ""), pf[c][0], rf))
     L += ["", "## 4. 價量歷史比 2021-02 短的 %d 個代碼" % len(short), "", "| 原因推測 | 個數 |", "|---|---:|"]
     for k, n in cls.most_common():
         L.append("| %s | %d |" % (k, n))
-    sus = [r for r in rows if r[0].startswith("營收 2021-01 以前")]
-    L += ["", "可疑者（前 40 個）：", "", "| 代碼 | 名稱 | 價量起 | 營收起 |", "|---|---|---|---|"]
-    for r in sus[:40]:
+    sus = [r for r in rows if r[0].startswith("價量從 repo")]
+    L += ["", "長期歷史完全沒補到的代碼（全部 %d 個）：" % len(sus), "", "| 代碼 | 名稱 | 價量起 | 營收最早月（民國） |", "|---|---|---|---|"]
+    for r in sus:
         L.append("| %s | %s | %s | %s |" % (r[1], r[2], r[3], r[4]))
     # 每月家數：若原始檔只收現存公司，越早的月份家數應該越少且不含下市公司
     L += ["", "## 5. 每年 1 月營收原始檔的家數（只收現存公司時，早年會偏少）", ""]
