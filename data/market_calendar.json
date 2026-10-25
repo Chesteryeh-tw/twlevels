@@ -1791,10 +1791,10 @@
 "holidaySchedule": "7644c1a8af784c09f54670fd7413f536b13eb76c54d658058e8873d1aee32117",
 "market_closures": "a278f9830496b143fbffda61316cee74d4412c1bde8bbaeda28da7a3da3576d6"
 },
-"built_at": "2026-10-25T03:53:02Z",
+"built_at": "2026-10-25T18:22:47Z",
 "sources_verified_at": {
-"FMTQIK_current": "2026-10-25T03:52:56Z",
-"holidaySchedule": "2026-10-25T03:53:02Z"
+"FMTQIK_current": "2026-10-25T18:22:40Z",
+"holidaySchedule": "2026-10-25T18:22:47Z"
 },
 "note": "built_at 只是重建時間；新鮮度看 sources_verified_at（必要來源最後一次成功抓到的時間）"
 }
