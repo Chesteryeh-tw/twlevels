@@ -27,6 +27,9 @@ class Stop(Exception):
     pass
 
 
+FAILS, CONSEC = [], [0]
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):
         return None
@@ -132,8 +135,20 @@ def fetch(dates):
                 return 3
             time.sleep(random.uniform(4, 7))
             url = URL[m].format(d=d, s="%s/%s/%s" % (d[:4], d[4:6], d[6:]))
-            b = get(url)
-            parse(b, m, d)                    # 驗過才存
+            try:
+                b = get(url)
+                parse(b, m, d)                    # 驗過才存
+            except Stop:
+                raise
+            except Exception as e:                # 單日失敗：記下、不存，連續 5 次就停（不是被拒，只是不硬撐）
+                FAILS.append("%s %s：%r" % (m, d, e))
+                print("::warning::官方母體核對 %s %s 失敗：%r" % (m, d, e))
+                if len(FAILS) >= 5 and all(f.split("：")[0] != "" for f in FAILS[-5:]) and CONSEC[0] >= 4:
+                    print("::error::連續失敗 5 次，停止抓取")
+                    return 4
+                CONSEC[0] += 1
+                continue
+            CONSEC[0] = 0
             with gzip.open(p, "wb") as f:
                 f.write(b)
     return 0
@@ -220,6 +235,8 @@ def main():
     tot_m = sum(r["official_only"] for r in rows)
     print("::notice::官方母體核對：%d／%d 日；官方母體 %d、本地缺 %d（%.2f%%）；100 缺碼進得了官方母體 %d 個" % (
         cover, len(dates), tot_o, tot_m, 100 * tot_m / tot_o if tot_o else 0, len(hit100)))
+    if FAILS:
+        print("::notice::單日失敗 %d 次（前 3 個）：%s" % (len(FAILS), "；".join(FAILS[:3])))
     sys.exit(code)
 
 
