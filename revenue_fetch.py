@@ -511,7 +511,7 @@ SNAP = os.path.join(RAW, "snapshots")
 
 def export_early():
     """給 GPT 複核早年母體：把 data/revenue_raw/early/ 裡的原始檔逐份列出 bytes、sha256、資料年月、出表日期、列數，
-    並匯出去重的代號清單 early_codes.csv（market、requested_ym、row_ym、code、name、industry、generated_date、source_file）。
+    並匯出代號清單 early_check/early_codes.csv（只有代號、名稱、產業別、日期，沒有營收金額；market、requested_ym、row_ym、code、name、industry、generated_date、source_file）。
     只讀已抓的檔，不連網。"""
     d = os.path.join(RAW, "early")
     files = sorted(os.listdir(d)) if os.path.isdir(d) else []
@@ -525,11 +525,12 @@ def export_early():
                          rows=len(body), row_ym=sorted({r[1].strip() for r in body}), generated=sorted({r[0].strip() for r in body})))
         for r in body:
             out.append([mkt, ym, r[1].strip(), r[2].strip(), r[3].strip(), r[4].strip(), r[0].strip(), fn])
-    with open("early_codes.csv", "w", encoding="utf-8-sig", newline="") as f:
+    os.makedirs("early_check", exist_ok=True)
+    with open(os.path.join("early_check", "early_codes.csv"), "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["market", "requested_ym", "row_ym", "code", "name", "industry", "generated_date", "source_file"])
         w.writerows(out)
-    json.dump(meta, open("early_files.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    json.dump(meta, open(os.path.join("early_check", "early_files.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("::notice::early 匯出：%d 份檔、%d 列；%s" % (len(meta), len(out), "；".join(
         "%s %s %d 列 %d bytes sha %s" % (m["market"], m["requested_ym"], m["rows"], m["bytes"], m["sha256"][:12]) for m in meta)))
 

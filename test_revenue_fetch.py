@@ -513,8 +513,8 @@ fresh()
 rf.download = lambda mkt, y, m: make_csv(mkt, y, m, ym="106/12")
 run_main(["--early-probe", "201712"])
 code = run_main(["--export-early"])
-rows = list(csv.reader(open("early_codes.csv", encoding="utf-8-sig")))
-meta = json.load(open("early_files.json", encoding="utf-8"))
+rows = list(csv.reader(open(os.path.join("early_check", "early_codes.csv"), encoding="utf-8-sig")))
+meta = json.load(open(os.path.join("early_check", "early_files.json"), encoding="utf-8"))
 check("E4 匯出清單：每列有市場、代號、資料年月；meta 有 bytes 與 sha256", code == 0 and len(rows) - 1 == len(meta[0:1]) * 0 + sum(m["rows"] for m in meta) and
       all(m["sha256"] and m["bytes"] for m in meta) and rows[1][0] in ("sii", "otc"), (code, len(rows)))
 
