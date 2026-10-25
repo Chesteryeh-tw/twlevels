@@ -1676,9 +1676,28 @@
 "20260928",
 "20261009",
 "20261010",
+"20261023",
 "20261025",
 "20261026",
 "20261225"
+],
+"closures": [
+"20261023"
+],
+"closure_sources": [
+{
+"date": "20261023",
+"market": "TWSE",
+"kind": "closure",
+"reason": "薔琵颱風，集中交易市場全日休市",
+"announced_at": "20261022",
+"source_url": "https://www.twse.com.tw/staticFiles/news/news/tsecnews/8a8216d6a0fa351b01a1638507940202.pdf",
+"source_sha256": "07cdb8663b36ad6a89f4568fd653f6bdb8c2699af60781187c1d8e77279cbd5f",
+"verified_by": "GPT 2026-10-25（08 第 6 節，已保存原 PDF）；Claude 未自行下載"
+}
+],
+"schedule_years": [
+"2026"
 ],
 "schedule_trading_marked": [
 "20260102",
@@ -1769,7 +1788,8 @@
 "FMTQIK_202608.json.gz": "824c3225784653e2d10a1e979064a0baf8f2a61c45fa4eddc10e7fd607d24b55",
 "FMTQIK_202609.json.gz": "dc712c7f16a9d732d9d4e21606e8927cd4d78039505c3256d697a005b17394d5",
 "FMTQIK_202610.json.gz": "3b7a8b632b848c7336c0c2fc7da9115f45f38758801e0d55bf8d806583f342c7",
-"holidaySchedule": "7644c1a8af784c09f54670fd7413f536b13eb76c54d658058e8873d1aee32117"
+"holidaySchedule": "7644c1a8af784c09f54670fd7413f536b13eb76c54d658058e8873d1aee32117",
+"market_closures": "a278f9830496b143fbffda61316cee74d4412c1bde8bbaeda28da7a3da3576d6"
 },
-"built_at": "2026-10-25T01:50:24Z"
+"built_at": "2026-10-25T03:04:25Z"
 }
