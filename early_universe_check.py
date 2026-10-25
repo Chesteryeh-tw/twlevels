@@ -109,6 +109,14 @@ def main():
     # 長期價量必須真的是 2021 起，否則分類會全錯（快取沒還原成功時只有 repo 的近一年）
     ex = min((l.split(",")[0] for f in files for l in open(f, encoding="utf-8") if l[:1].isdigit()), default="99999999")
     print("長期價量最早日期 %s（%d 個檔）" % (ex, len(files)))
+    firsts = {}
+    for f in files:
+        d0 = [l.split(",")[0] for l in open(f, encoding="utf-8") if l[:1].isdigit()]
+        if d0:
+            firsts[os.path.basename(f)[:-4]] = (min(d0), len(d0))
+    full = sum(1 for v in firsts.values() if v[0] <= "20210201")
+    short = sorted(c for c, v in firsts.items() if v[0] > "20210201")
+    print("::notice::價量歷史完整（最早 ≤ 2021-02-01）的代碼 %d 個、較短的 %d 個；較短者前 40 個：%s" % (full, len(short), ",".join(short[:40])))
     if ex > "20210201":
         print("::error::長期價量只到 %s，不是 2021 起；股價歷史快取沒還原，不輸出核對結果" % ex)
         sys.exit(2)
