@@ -102,6 +102,7 @@ jobs:
             revenue-raw-
 
       - name: 還原股價歷史（early_universe）
+        id: hist
         if: env.MODE == 'early_universe'
         uses: actions/cache/restore@v4
         with:
@@ -114,6 +115,7 @@ jobs:
       - name: 核對缺碼（不連網）
         if: env.MODE == 'early_universe'
         run: |
+          echo "::notice::股價歷史快取命中的鍵：'${{ steps.hist.outputs.cache-matched-key }}'（空白＝沒有命中）"
           python test_early_universe.py
           python revenue_fetch.py --panel-only
           python early_universe_check.py

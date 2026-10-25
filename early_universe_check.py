@@ -106,9 +106,12 @@ def main():
         rev.setdefault(r["code"], {})[r["ym"]] = 1
     stock = os.path.join("data", "stock")
     files = glob.glob(os.path.join(stock, "*.txt"))
-    # 長期價量必須真的是 2021 起，否則分類會全錯
-    ex = min((l for l in open(files[0], encoding="utf-8") if l[:1].isdigit()), default="99999999,").split(",")[0]
-    print("長期價量樣本檔最早日期 %s（%s）" % (ex, os.path.basename(files[0])))
+    # 長期價量必須真的是 2021 起，否則分類會全錯（快取沒還原成功時只有 repo 的近一年）
+    ex = min((l.split(",")[0] for f in files for l in open(f, encoding="utf-8") if l[:1].isdigit()), default="99999999")
+    print("長期價量最早日期 %s（%d 個檔）" % (ex, len(files)))
+    if ex > "20210201":
+        print("::error::長期價量只到 %s，不是 2021 起；股價歷史快取沒還原，不輸出核對結果" % ex)
+        sys.exit(2)
     rows = run(codes, stock, rev)
     with open(os.path.join("early_check", "universe_check.csv"), "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
