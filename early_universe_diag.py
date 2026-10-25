@@ -53,12 +53,10 @@ def main():
         by_code[code].add(ym)
         gen_by_file[(mkt, fn)][gen] += 1
         ym_codes[(mkt, ym)].add(code)
-    for mkt in ("sii", "otc"):
-        for f in sorted(glob.glob(os.path.join("data", "revenue_raw", mkt, "*.csv"))):
-            b = open(f, "rb").read()
-            for c in FIVE:
-                if (",%s," % c).encode() in b or ('"%s"' % c).encode() in b:
-                    raw_hit[c].append("%s/%s" % (mkt, os.path.basename(f)))
+    # GPT 09：只認「公司代號」欄（第 3 欄）；不用整檔字串搜尋（營收金額剛好等於代號也會命中）
+    for mkt, fn, gen, ym, code in raw_rows():
+        if code in FIVE:
+            raw_hit[code].append("%s/%s（%s）" % (mkt, fn, ym))
     rev_codes = set(by_code)
     not_now = sorted(c for c in rev_codes if c not in mk)
     L = ["# 缺碼原因診斷（不連網；只有代碼、日期、家數）", ""]
@@ -71,7 +69,7 @@ def main():
         L.append("- %s：%d 份" % (g, n))
     L += ["", "## 2. 營收原始檔裡有、現行市場清單（market.txt，%d 檔）沒有的代碼：%d 個" % (len(mk), len(not_now)), "",
           "前 60 個：" + ", ".join(not_now[:60]), ""]
-    L += ["## 3. 五檔（現在交易中但營收表一筆都沒有）", "", "| 代碼 | 在現行市場清單 | 原始檔逐字搜尋命中 | 價量起訖 |", "|---|---|---|---|"]
+    L += ["## 3. 五檔（現在交易中但營收表一筆都沒有）", "", "| 代碼 | 在現行市場清單 | 原始檔「公司代號」欄出現的檔（含歷史留存版本） | 價量起訖 |", "|---|---|---|---|"]
     for c in FIVE:
         p = pf.get(c)
         L.append("| %s | %s | %s | %s |" % (c, "是" if c in mk else "否", "；".join(raw_hit[c][:5]) or "無", "%s～%s" % (p[0], p[1]) if p else "無"))
@@ -82,11 +80,11 @@ def main():
         yms = sorted(by_code.get(c, ()), key=lambda x: tuple(int(t) for t in x.split("/")))
         rf = yms[0] if yms else ""
         if c not in mk:
-            k = "不在現行市場清單（近期下市／改碼）"
+            k = "不在現行市場清單（推測近期下市／改碼；不是官方終止上市證明）"
         elif pf[c][0] == REPO_START:
-            k = "價量從 repo 每日資料起點才有（長期歷史完全沒補到）"
+            k = "價量從 repo 每日資料起點才有（長期歷史沒補到）"
         else:
-            k = "價量 2021-02 之後才開始（多為新上市櫃；未逐檔核掛牌日）"
+            k = "價量 2021-02 之後才開始（推測多為新上市櫃；未逐檔核官方掛牌日）"
         cls[k] += 1
         rows.append((k, c, mk.get(c, ""), pf[c][0], rf))
     L += ["", "## 4. 價量歷史比 2021-02 短的 %d 個代碼" % len(short), "", "| 原因推測 | 個數 |", "|---|---:|"]

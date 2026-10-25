@@ -79,18 +79,19 @@ def report(rows, n_codes_hist, n_panel):
     L = ["# 早年營收缺碼 vs 研究母體（範圍與可用性，沒有看 SUS 排名或績效）", "",
          "缺碼 %d 個（官方 2017/12/29 日行情有、2017-12 兩份營收原檔都沒有）；長期價量檔 %d 個代碼；2020 起營收表 %d 個代碼。" % (len(rows), n_codes_hist, n_panel), "",
          "| 分類 | 代碼數 | 意思 |", "|---|---:|---|"]
-    meaning = dict(no_price_history="長期價量沒有此代碼：無法證明 2021 後可交易（多為下市、合併、改碼；長期價量只收現在還在市場上的代碼，這是已知的存活偏誤）",
-                   ended_before_2021="2021 前已無價格，不影響研究",
-                   never_liquid="2021 起從未達成交額 1 億，不進母體",
-                   liquid_with_panel="進得了母體，2020 起營收表有此代碼；早年缺口只影響最前面的月份",
-                   liquid_no_panel="進得了母體，但 2020 起營收表也沒有：實際缺營收")
+    meaning = dict(no_price_history="目前資料不足以判斷（長期價量沒有此代碼；不等於已下市或不在當年母體）",
+                   ended_before_2021="已有價量在 2021 前結束",
+                   never_liquid="在已有價量覆蓋的日子內未達 1 億；覆蓋不完整時仍未知",
+                   liquid_with_panel="初篩候選：有價量達 1 億、2020 起營收表有此代碼（未逐個 SUS 決策日確認）",
+                   liquid_no_panel="初篩候選：有價量達 1 億、2020 起營收表沒有此代碼（未逐個 SUS 決策日確認）")
     for k in ("no_price_history", "ended_before_2021", "never_liquid", "liquid_with_panel", "liquid_no_panel"):
         L.append("| %s | %d | %s |" % (k, cnt.get(k, 0), meaning[k]))
     imp = [r for r in rows if r["category"] in ("liquid_with_panel", "liquid_no_panel")]
     L += ["", "## 進得了母體的代碼（%d 個）" % len(imp), "", "| 市場 | 代碼 | 名稱 | 分類 | 達標月數 | 其中早年窗口(≤2023-01) | 營收月數 | 營收起訖 |", "|---|---|---|---|---:|---:|---:|---|"]
     for r in imp:
         L.append("| %s | %s | %s | %s | %d | %d | %d | %s～%s |" % (r["market"], r["code"], r["name"], r["category"], r["liquid_months"], r["liquid_months_in_early_window"], r["rev_months"], r["rev_first"], r["rev_last"]))
-    L += ["", "限制：看的是代碼是否有價量／營收，不證明新舊代碼、合併是否同一家公司；沒有價量的代碼不能說它「當時沒交易」。"]
+    L += ["", "限制：看的是本地資料有沒有價量／營收，不證明新舊代碼、合併是否同一家公司；沒有價量的代碼不能說它「當時沒交易」。",
+          "按各版進場前一交易日、用官方日行情重算的母體核對見 universe_official.md。"]
     return "\n".join(L) + "\n"
 
 
