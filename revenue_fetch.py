@@ -509,6 +509,31 @@ def record_version(man, key, mkt, ym, data, body, gen, started, got):
 SNAP = os.path.join(RAW, "snapshots")
 
 
+def export_early():
+    """給 GPT 複核早年母體：把 data/revenue_raw/early/ 裡的原始檔逐份列出 bytes、sha256、資料年月、出表日期、列數，
+    並匯出去重的代號清單 early_codes.csv（market、requested_ym、row_ym、code、name、industry、generated_date、source_file）。
+    只讀已抓的檔，不連網。"""
+    d = os.path.join(RAW, "early")
+    files = sorted(os.listdir(d)) if os.path.isdir(d) else []
+    meta, out = [], []
+    for fn in files:
+        mkt, ym, _sha = fn[:-4].split("_")
+        data = open(os.path.join(d, fn), "rb").read()
+        rows = [r for r in csv.reader(io.StringIO(data.decode("utf-8-sig"))) if any(x.strip() for x in r)]
+        body = rows[1:]
+        meta.append(dict(file=fn, market=mkt, requested_ym=ym, bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                         rows=len(body), row_ym=sorted({r[1].strip() for r in body}), generated=sorted({r[0].strip() for r in body})))
+        for r in body:
+            out.append([mkt, ym, r[1].strip(), r[2].strip(), r[3].strip(), r[4].strip(), r[0].strip(), fn])
+    with open("early_codes.csv", "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["market", "requested_ym", "row_ym", "code", "name", "industry", "generated_date", "source_file"])
+        w.writerows(out)
+    json.dump(meta, open("early_files.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print("::notice::early 匯出：%d 份檔、%d 列；%s" % (len(meta), len(out), "；".join(
+        "%s %s %d 列 %d bytes sha %s" % (m["market"], m["requested_ym"], m["rows"], m["bytes"], m["sha256"][:12]) for m in meta)))
+
+
 def save_snapshot(ym):
     """SUS 事先登記 v2.4 第 2、9 節「共同營收快照」：營收月 ym 第一次成功發布 panel 時，把當下整張 panel 原樣存成不可變快照，
     記下 cutoff_at（這一刻的 UTC 時間）與雜湊。已存在就不動（之後的更正不回填）。11 日版與 16 日版都只用這一份。"""
@@ -593,6 +618,9 @@ def early_probe(ym):
 
 def main():
     args = sys.argv[1:]
+    if "--export-early" in args:
+        export_early()
+        return
     if "--early-probe" in args:
         early_probe(args[args.index("--early-probe") + 1])
         return

@@ -46,7 +46,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in data/corporate_actions.csv corporate_actions_match.md; do [ -f "$f" ] && git add -f "$f"; done
+          for f in data/corporate_actions.csv corporate_actions_match.md corporate_actions_gaps.csv; do [ -f "$f" ] && git add -f "$f"; done
           if git diff --cached --quiet; then echo "沒有變動"; else
             git commit -m "公司行動事件表（官方總表）"
             git pull --rebase --autostash

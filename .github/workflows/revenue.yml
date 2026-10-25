@@ -12,7 +12,7 @@ on:
       mode:
         description: "先選 test（1 分鐘），通過再選 full"
         type: choice
-        options: [test, full, early]
+        options: [test, full, early, export_early]
         default: test
 
 permissions:
@@ -53,6 +53,30 @@ jobs:
       - name: 早年試抓 2017-12（2 份）
         if: env.MODE == 'early'
         run: python revenue_fetch.py --early-probe 201712
+
+      - name: 還原已抓的月營收（export_early）
+        if: env.MODE == 'export_early'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: revenue-raw-
+          restore-keys: |
+            revenue-raw-
+
+      - name: 匯出早年試抓清單與原始檔（給 GPT 複核母體；只放下載區 30 天，不進 repo）
+        if: env.MODE == 'export_early'
+        run: python revenue_fetch.py --export-early
+
+      - name: 上傳早年原始檔與清單
+        if: env.MODE == 'export_early'
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-early
+          path: |
+            data/revenue_raw/early/*.csv
+            early_codes.csv
+            early_files.json
+          retention-days: 30
 
       - name: 存進快取（early）
         if: always() && env.MODE == 'early'

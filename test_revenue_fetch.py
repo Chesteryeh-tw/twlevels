@@ -508,5 +508,15 @@ rf.download = lambda mkt, y, m: (_ for _ in ()).throw(rf.Blocked("x")) if (y, m)
 run_main()
 check("K3 目標月沒抓齊（被擋）→ 不存快照", not os.path.exists(os.path.join(rf.SNAP, "202102")))
 
+# ---- 早年清單匯出 ----
+fresh()
+rf.download = lambda mkt, y, m: make_csv(mkt, y, m, ym="106/12")
+run_main(["--early-probe", "201712"])
+code = run_main(["--export-early"])
+rows = list(csv.reader(open("early_codes.csv", encoding="utf-8-sig")))
+meta = json.load(open("early_files.json", encoding="utf-8"))
+check("E4 匯出清單：每列有市場、代號、資料年月；meta 有 bytes 與 sha256", code == 0 and len(rows) - 1 == len(meta[0:1]) * 0 + sum(m["rows"] for m in meta) and
+      all(m["sha256"] and m["bytes"] for m in meta) and rows[1][0] in ("sii", "otc"), (code, len(rows)))
+
 print("\n%d 項失敗" % len(FAILS) if FAILS else "\n全部通過")
 sys.exit(1 if FAILS else 0)

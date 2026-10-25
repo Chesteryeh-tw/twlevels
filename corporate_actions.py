@@ -233,7 +233,7 @@ def build():
 def gaps(root=os.path.join("data", "stock"), th=11.0):
     ev = []
     for p in sorted(glob.glob(os.path.join(root, "*.txt"))):
-        code, prev = os.path.basename(p)[:-4], None
+        code, prev, pdate = os.path.basename(p)[:-4], None, None
         for line in open(p, encoding="utf-8"):
             if line.startswith("#") or not line.strip():
                 continue
@@ -243,30 +243,40 @@ def gaps(root=os.path.join("data", "stock"), th=11.0):
             except (ValueError, IndexError):
                 continue
             if prev and o > 0 and abs(o / prev * 100 - 100) > th:
-                ev.append((code, d, prev, o, (o / prev - 1) * 100))
-            prev = c
+                ev.append((code, d, prev, o, (o / prev - 1) * 100, pdate))
+            prev, pdate = c, d
     return ev
 
 
 def match(rows, ev):
-    idx = {}
+    """斷點 (code, 日期 d, 前收, 開盤, 跳動%, 前一筆有效股價日 p)：官方生效日 e 落在 p < e ≤ d 就算對上
+    （停牌或當天無成交時，第一筆價格會晚於官方恢復買賣日；GPT 10-25 建議）。"""
+    by_code = {}
     for r in rows:
-        idx.setdefault((r["code"], r["effective_date"]), []).append(r)
+        by_code.setdefault(r["code"], []).append(r)
     hit, miss = [], []
     for e in ev:
-        rs = idx.get((e[0], e[1]))
+        rs = [r for r in by_code.get(e[0], []) if (e[5] or "") < r["effective_date"] <= e[1]]
         (hit if rs else miss).append((e, rs))
     kinds = {}
     for _e, rs in hit:
         k = "/".join(sorted({r["type"] for r in rs}))
         kinds[k] = kinds.get(k, 0) + 1
+    exact = sum(1 for e, rs in hit if any(r["effective_date"] == e[1] for r in rs))
     L = ["# 價格斷點 × 官方公司行動表", "",
-         "價格斷點＝repo data/stock（未還原）開盤比前一天收盤差超過 11%%，共 %d 筆；對上官方事件 %d 筆，對不上 %d 筆。" % (len(ev), len(hit), len(miss)),
+         "價格斷點＝repo data/stock（未還原）開盤比前一天收盤差超過 11%%，共 %d 筆；對上官方事件 %d 筆（生效日＝斷點日 %d 筆，"
+         "生效日落在前一筆有效股價日之後、斷點日之前 %d 筆），對不上 %d 筆。" % (len(ev), len(hit), exact, len(hit) - exact, len(miss)),
          "", "對上的類型：" + "、".join("%s %d" % kv for kv in sorted(kinds.items())), "",
-         "## 對不上的（不猜原因，待查）", "| 代號 | 日期 | 前收 | 開盤 | 跳動 % |", "|---|---|---|---|---|"]
-    L += ["| %s | %s | %.2f | %.2f | %+.1f |" % e for e, _ in miss]
+         "## 對不上的（不猜原因，待查）", "| 代號 | 日期 | 前一筆股價日 | 前收 | 開盤 | 跳動 % |", "|---|---|---|---|---|---|"]
+    L += ["| %s | %s | %s | %.2f | %.2f | %+.1f |" % (e[0], e[1], e[5], e[2], e[3], e[4]) for e, _ in miss]
     open(MATCH, "w", encoding="utf-8").write("\n".join(L) + "\n")
-    print("::notice::價格斷點 %d 筆：對上官方事件 %d、對不上 %d" % (len(ev), len(hit), len(miss)))
+    with open("corporate_actions_gaps.csv", "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["code", "date", "prev_price_date", "prev_close", "open", "gap_pct", "matched", "event_types", "effective_dates", "sources"])
+        for e, rs in hit + miss:
+            w.writerow([e[0], e[1], e[5], e[2], e[3], "%.1f" % e[4], int(bool(rs)), "/".join(sorted({r["type"] for r in rs})),
+                        "/".join(sorted({r["effective_date"] for r in rs})), "/".join(sorted({r["source"] for r in rs}))])
+    print("::notice::價格斷點 %d 筆：對上官方事件 %d（其中生效日早於斷點日 %d）、對不上 %d" % (len(ev), len(hit), len(hit) - exact, len(miss)))
     return hit, miss
 
 
