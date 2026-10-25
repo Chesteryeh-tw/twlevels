@@ -1,0 +1,30 @@
+[
+ {
+  "file": "otc_201712_deaddd91ff82.csv",
+  "market": "otc",
+  "requested_ym": "201712",
+  "bytes": 137861,
+  "sha256": "deaddd91ff824c338cd655c801c7cb770a8d9949faf37109431d56a27c7295b4",
+  "rows": 749,
+  "row_ym": [
+   "106/12"
+  ],
+  "generated": [
+   "115/09/23"
+  ]
+ },
+ {
+  "file": "sii_201712_0eb98dcaa40d.csv",
+  "market": "sii",
+  "requested_ym": "201712",
+  "bytes": 173594,
+  "sha256": "0eb98dcaa40d2de7147a40fc5a4ca82a1d370ac3fb2e1e7ad19f99d33b463107",
+  "rows": 937,
+  "row_ym": [
+   "106/12"
+  ],
+  "generated": [
+   "115/10/11"
+  ]
+ }
+]
