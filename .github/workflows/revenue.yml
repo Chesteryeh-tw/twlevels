@@ -119,13 +119,14 @@ jobs:
           python test_early_universe.py
           python revenue_fetch.py --panel-only
           python early_universe_check.py
+          python early_universe_diag.py
 
       - name: 推回缺碼核對結果
         if: env.MODE == 'early_universe'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f early_check/universe_check.csv early_check/universe_check.md
+          git add -f early_check/universe_check.csv early_check/universe_check.md early_check/universe_diag.md
           if git diff --cached --quiet; then echo "沒有變動"; else
             git commit -m "早年營收缺碼 vs 研究母體核對（只有代碼與次數）"
             git pull --rebase --autostash
