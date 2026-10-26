@@ -122,16 +122,20 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json
+          # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
+          run_git(){ out=$("$@" 2>&1); rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
+          ls -la data/bt_series.json backtest.json data/bt_tags.json || true
+          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json
           if git diff --cached --quiet; then
             echo "沒有變動"
           else
-            git commit -m "FinMind 補歷史後重跑回測（起始 ${{ inputs.start_date }}）"
+            run_git git commit -m "FinMind 補歷史後重跑回測（起始 ${{ inputs.start_date }}）"
             # --autostash：補完歷史之後 data/stock 底下上千個檔案都被改過但沒 commit，
             # 一般的 pull --rebase 碰到未提交的變動會直接拒絕。autostash 會先收起來、
             # rebase 完再放回去 —— 不能用 checkout 丟掉，那些檔案還要留給快取保存。
-            git pull --rebase --autostash
-            git push
+            run_git git pull --rebase --autostash
+            run_git git push
+            echo "::notice title=推回報告::完成 $(git log -1 --format=%h)"
           fi
 
       # 疑似起漲／疑似起跌逐筆清單（給 GPT 複核）。只放 Actions 下載區、保留 30 天，不 commit 進 repo。
