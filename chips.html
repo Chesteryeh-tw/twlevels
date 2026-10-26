@@ -82,7 +82,7 @@ a{color:var(--accent)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .info{padding:8px 12px;border-bottom:1px solid var(--line2);display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;min-height:38px}
 .info b{font-weight:600}
-.chartbox{position:relative;height:calc(100vh - 150px);min-height:520px}
+.chartbox{position:relative;height:640px}
 #chart{position:absolute;inset:0}
 .grip{height:14px;cursor:ns-resize;display:flex;align-items:center;justify-content:center;gap:6px;
   font-size:11px;color:var(--muted);border-top:1px solid var(--line2);user-select:none;touch-action:none}
@@ -91,6 +91,10 @@ a{color:var(--accent)}
 .band{position:absolute;top:0;bottom:0;background:var(--band);pointer-events:none;z-index:2;display:none;
   border-left:1px dashed var(--accent);border-right:1px dashed var(--accent)}
 .legends{position:absolute;inset:0;pointer-events:none;z-index:3}
+.grips{position:absolute;inset:0;pointer-events:none;z-index:4}
+.pgrip{position:absolute;left:0;right:0;height:9px;cursor:ns-resize;pointer-events:auto;touch-action:none}
+.pgrip::after{content:"";position:absolute;left:50%;top:3px;width:36px;height:3px;margin-left:-18px;border-radius:2px;background:var(--muted);opacity:.35}
+.pgrip:hover::after{opacity:.9;background:var(--accent)}
 .lg{position:absolute;left:8px;font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;
   background:color-mix(in srgb,var(--surface) 82%,transparent);padding:1px 6px;border-radius:6px;max-width:calc(100% - 90px)}
 .lg .t{font-weight:700}
@@ -151,7 +155,7 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
   .wrap{grid-template-columns:minmax(0,1fr);padding:10px}
   .top{padding:8px 10px;position:static}
   .q input{width:120px}
-  .chartbox{height:72vh;min-height:460px}
+
 }
 </style>
 </head>
@@ -183,8 +187,8 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
       <div id="chart"></div>
       <div class="band" id="band"></div>
       <div class="legends" id="legends"></div>
+      <div class="grips" id="grips"></div>
     </div>
-    <div class="grip" id="grip" title="上下拖曳調整圖表高度；點兩下恢復自動">拖曳調整高度</div>
     <div class="foot">點圖上任一天：右側顯示那一天的分點明細，色帶是統計區間。紅＝買超／上漲，綠＝賣超／下跌。分點資料只在榜單內觀察到，沒上榜的日子是空白，不是 0。<br>圖表元件：<a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts™</div>
   </section>
 
@@ -276,10 +280,10 @@ var S = {
 try{ var saved=JSON.parse(localStorage.getItem('twlvChipsUI')||'{}');
   if(saved.panes) for(var k in saved.panes) if(k in S.panes) S.panes[k]=!!saved.panes[k];
   if(saved.months!=null) S.months=saved.months;
-  if(saved.chartH) S.chartH=+saved.chartH;
+  if(saved.ph&&typeof saved.ph==='object') S.ph=saved.ph;
   if(saved.cfg) for(var kc in saved.cfg) if(kc in S.cfg && +saved.cfg[kc]>0) S.cfg[kc]=+saved.cfg[kc];
 }catch(e){}
-function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({panes:S.panes,months:S.months,chartH:S.chartH||0,cfg:S.cfg})); }catch(e){} }
+function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({panes:S.panes,months:S.months,ph:S.ph||{},cfg:S.cfg})); }catch(e){} }
 
 var PANES = [
   ['vol','成交量＋均量線'],['main','主力買賣超'],['fgn','外資'],['inv','投信'],['dlr','自營商'],['dS','自營（自行買賣）'],['dH','自營（避險）'],['isum','三大法人合計'],
@@ -459,7 +463,7 @@ function themeOpts(){
   return {
     layout:{ background:{type:'solid',color:css('--surface')}, textColor:css('--muted'),
       fontFamily:'"IBM Plex Mono", ui-monospace, monospace', fontSize:11,
-      panes:{separatorColor:css('--line'), separatorHoverColor:css('--accent-soft'), enableResize:true},
+      panes:{separatorColor:css('--muted'), separatorHoverColor:css('--muted'), enableResize:false},
       attributionLogo:false },
     grid:{ vertLines:{color:css('--line2')}, horzLines:{color:css('--line2')} },
     rightPriceScale:{ borderColor:css('--line') },
@@ -467,35 +471,42 @@ function themeOpts(){
     crosshair:{ mode:LC.CrosshairMode.Normal }
   };
 }
-// 圖表總高度：副圖越多越高（頁面往下捲）；也可以拖下方把手自己調，記在瀏覽器（點兩下恢復自動）
-function autoHeight(){
-  var n=chart?chart.panes().length:1, small=window.innerWidth<=860;
-  var base=small?Math.round(window.innerHeight*0.72):window.innerHeight-150;
-  var need=(small?260:340)+(small?95:115)*Math.max(0,n-1);
-  return Math.max(small?460:520, base, need);
-}
+// 高度（2026-10-26 改）：每個副圖各自一個高度（px），拖副圖底下的把手只改那一格，整張圖跟著變長，
+// 不會擠到其他副圖。點兩下把手恢復預設。高度記在瀏覽器。
+var TS_H=30;                                   // 下方時間軸
+function paneKeys(){ var ks=['k']; PANES.forEach(function(pp){ if(paneIdx[pp[0]]!=null) ks[paneIdx[pp[0]]]=pp[0]; }); return ks; }
+function defH(k){ var small=window.innerWidth<=860; return k==='k' ? (small?300:400) : (small?100:120); }
+function paneH(k){ var v=S.ph&&S.ph[k]; return v>=40 ? v : defH(k); }
 function fitHeight(){
-  var box=document.querySelector('.chartbox'); if(!box) return;
-  box.style.height=(S.chartH>0?S.chartH:autoHeight())+'px';
+  var box=document.querySelector('.chartbox'); if(!box||!chart) return;
+  var ks=paneKeys(), tot=TS_H;
+  chart.panes().forEach(function(p,i){ var h=paneH(ks[i]); p.setStretchFactor(h); tot+=h+1; });
+  box.style.height=tot+'px';
   relayout();
 }
-// 圖表改高度後，等它自己排好（autoSize 是非同步的）再放副圖標籤與色帶
 function relayout(){
   requestAnimationFrame(function(){ requestAnimationFrame(function(){ if(chart){ drawBand(); placeLegends(); } }); });
   setTimeout(function(){ if(chart){ drawBand(); placeLegends(); } }, 120);
 }
-(function(){
-  var g=$('grip'); if(!g) return;
-  var y0=0,h0=0,drag=false;
-  g.addEventListener('pointerdown',function(e){ drag=true; y0=e.clientY; h0=document.querySelector('.chartbox').getBoundingClientRect().height;
-    try{ g.setPointerCapture(e.pointerId); }catch(_){} e.preventDefault(); });
-  g.addEventListener('pointermove',function(e){ if(!drag) return;
-    S.chartH=Math.max(300,Math.min(4000,Math.round(h0+e.clientY-y0))); fitHeight(); });
-  function end(){ if(!drag) return; drag=false; saveUI(); }
-  g.addEventListener('pointerup',end); g.addEventListener('pointercancel',end);
-  g.addEventListener('dblclick',function(){ S.chartH=0; fitHeight(); saveUI(); });
-  window.addEventListener('resize',function(){ if(!(S.chartH>0)) fitHeight(); });
-})();
+// 各副圖底下的拖曳把手
+function placeGrips(){
+  var box=$('grips'); if(!box||!chart){ if(box) box.innerHTML=''; return; }
+  var tops=paneTops(), ks=paneKeys(), hs=chart.panes().map(function(p){ return p.getHeight(); });
+  // 已經有同一組把手（例如正在拖）：只移動位置，不重建，否則拖到一半會斷
+  var cur=box.querySelectorAll('.pgrip');
+  if(cur.length===ks.length&&Array.prototype.every.call(cur,function(g,i){ return g.getAttribute('data-k')===ks[i]; })){
+    Array.prototype.forEach.call(cur,function(g,i){ g.style.top=(tops[i]+hs[i]-4)+'px'; }); return; }
+  box.innerHTML=ks.map(function(k,i){ return '<div class="pgrip" data-k="'+k+'" title="上下拖曳調整這一格的高度；點兩下恢復" style="top:'+(tops[i]+hs[i]-4)+'px"></div>'; }).join('');
+  Array.prototype.forEach.call(box.querySelectorAll('.pgrip'),function(g){
+    var k=g.getAttribute('data-k'), y0=0, h0=0, drag=false;
+    g.addEventListener('pointerdown',function(e){ drag=true; y0=e.clientY; h0=paneH(k); try{ g.setPointerCapture(e.pointerId); }catch(_){} e.preventDefault(); });
+    g.addEventListener('pointermove',function(e){ if(!drag) return; (S.ph=S.ph||{})[k]=Math.max(40,Math.min(2000,Math.round(h0+e.clientY-y0))); fitHeight(); });
+    var end=function(){ if(!drag) return; drag=false; saveUI(); };
+    g.addEventListener('pointerup',end); g.addEventListener('pointercancel',end);
+    g.addEventListener('dblclick',function(){ if(S.ph) delete S.ph[k]; fitHeight(); saveUI(); });
+  });
+}
+window.addEventListener('resize',function(){ if(chart) fitHeight(); });
 function buildChart(){
   if(chart){ chart.remove(); chart=null; }
   ser={}; paneIdx={};
@@ -552,13 +563,16 @@ function buildChart(){
     });
     chart.panes()[p6].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
   // 高度：主圖大、副圖小
-  var ps=chart.panes(); ps[0].setStretchFactor(3.2); for(var i=1;i<ps.length;i++) ps[i].setStretchFactor(1);
   fitHeight();
 
   chart.subscribeCrosshairMove(onMove);
   chart.subscribeClick(function(p){ if(S.picking||S.justPicked) return; if(p&&p.time){ S.sel=String(p.time).replace(/-/g,''); renderSide(); drawBand(); updateLegend(S.hover); } });
   chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ drawBand(); placeLegends(); });
   new ResizeObserver(function(){ relayout(); }).observe(el);
+  // 拖曳副圖之間的分隔線只會改各副圖高度、整張圖不變，要個別盯每個副圖，標籤才會跟著移
+  if(S.paneRO) S.paneRO.disconnect();
+  S.paneRO=new ResizeObserver(function(){ placeLegends(); drawBand(); });
+  chart.panes().forEach(function(pp){ try{ var he=pp.getHTMLElement(); if(he) S.paneRO.observe(he); }catch(e){} });
   fillData();
   applyRange();
 }
@@ -628,10 +642,12 @@ function paneTops(){
 }
 function placeLegends(){
   var box=$('legends'); if(!chart){ box.innerHTML=''; return; }
-  var tops=paneTops(), html=[];
-  html.push('<div class="lg" data-p="k" style="top:'+(tops[0]+4)+'px"></div>');
-  PANES.forEach(function(pp){ var k=pp[0]; if(paneIdx[k]!=null) html.push('<div class="lg" data-p="'+k+'" style="top:'+(tops[paneIdx[k]]+3)+'px"></div>'); });
+  var tops=paneTops(), hs=chart.panes().map(function(p){ return p.getHeight(); }), html=[];
+  var box2=function(i,dy){ return 'top:'+(tops[i]+dy)+'px;max-height:'+Math.max(0,hs[i]-dy-2)+'px;overflow:hidden'+(hs[i]<26?';display:none':''); };
+  html.push('<div class="lg" data-p="k" style="'+box2(0,4)+'"></div>');
+  PANES.forEach(function(pp){ var k=pp[0]; if(paneIdx[k]!=null) html.push('<div class="lg" data-p="'+k+'" style="'+box2(paneIdx[k],3)+'"></div>'); });
   box.innerHTML=html.join('');
+  placeGrips();
   updateLegend(S.hover||null);
 }
 function legendSet(k,h){ var el=document.querySelector('.lg[data-p="'+k+'"]'); if(el) el.innerHTML=h; }
