@@ -47,6 +47,11 @@ jobs:
       - name: 計算技術指標
         run: python indicators.py
 
+      # 主站頂端的大盤狀態列：全市場站上月線、月線上升的比例（只用官方收盤價）
+      - name: 大盤寬度
+        continue-on-error: true
+        run: python breadth.py data
+
       # 分點補抓用：「爆量長紅＋漲停」清單（只用官方價量，可以公開）
       - name: 爆量長紅＋漲停清單
         continue-on-error: true

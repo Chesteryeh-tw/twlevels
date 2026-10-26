@@ -20,7 +20,11 @@ def main(src="backtest.json", dst=os.path.join("data", "bt_tags.json")):
         x = (r.get("h") or {}).get(h) or {}
         out["tags"][k] = {"name": r.get("name"), "side": r.get("side"), "tag": tag, "cls": css,
                           "h": h, "t": x.get("t"), "excess": x.get("excess"),
-                          "net": net, "why": why}
+                          "net": net, "why": why,
+                          # 2026-10-26 加給「事件」頁：照方向的勝率、賺賠比、最大回落、筆數
+                          "win": x.get("win_dir"), "payoff": x.get("payoff"),
+                          "mdd": x.get("mdd"), "n": x.get("n"),
+                          "avg_picks": r.get("avg_picks")}
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))

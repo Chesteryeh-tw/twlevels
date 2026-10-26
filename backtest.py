@@ -965,7 +965,9 @@ def run(limit_days=None, verbose=True, exits=None):
                 xtrades=xtrades, xcounts=xcounts, xusable=xusable)
 
 
-def summarize(res):
+def summarize(res, series=None):
+    """series：傳一個 dict 進來，就順便收集各情境的逐日序列（給主站「事件」頁畫累計圖）。
+    2026-10-26 加：只多輸出，不改任何既有欄位的算法。"""
     out = []
     for pname, (label, side, spec) in PRESETS.items():
         cnt = res["counts"][pname]
@@ -1029,8 +1031,47 @@ def summarize(res):
                                pos_days=pos_days, monthly=monthly,
                                states=dict(res["states"][pname].get(h, {}))
                                if h in HORIZONS else None)
+            row["h"][h].update(_dir_stats(rets, by_day, side))
+            if series is not None and h in HORIZONS:
+                series.setdefault(pname, {})[str(h)] = _cum_series(recs, side)
         out.append(row)
     return out
+
+
+def _sign(side):
+    return -1 if side == "空" else 1
+
+
+def _dir_stats(rets, by_day, side):
+    """照情境方向（空方取負號）的勝率、平均賺、平均賠、賺賠比，和累計超額的最大回落。
+    win（原欄位）是「報酬 > 0」，空方情境要看 win_dir 才是「照方向做有賺」的比例。"""
+    s = _sign(side)
+    d = [s * r for r in rets]
+    n = len(d)
+    wins = [x for x in d if x > 0]
+    loss = [x for x in d if x < 0]
+    aw = sum(wins) / len(wins) if wins else None
+    al = sum(loss) / len(loss) if loss else None
+    cum = peak = mdd = 0.0
+    for _, v in sorted(by_day.items()):
+        cum += s * sum(v) / len(v)
+        peak = max(peak, cum)
+        mdd = min(mdd, cum - peak)
+    return dict(win_dir=len(wins) / n * 100 if n else None,
+                avg_win=aw, avg_loss=al,
+                payoff=(aw / -al) if (aw is not None and al) else None,
+                mdd=mdd if by_day else None)
+
+
+def _cum_series(recs, side):
+    """逐日 {日期: 當天平均超額（照方向，%）}。超額＝個股報酬 − 同日大盤（b）。
+    畫圖時逐日累加；持有期重疊，不是資金曲線。"""
+    s = _sign(side)
+    by_day = defaultdict(list)
+    for r, b, bmd, dd in recs:
+        if b is not None:
+            by_day[dd].append(r - b)
+    return {dd: round(s * sum(v) / len(v), 2) for dd, v in by_day.items()}
 
 
 COST_DAY = 0.235     # 當沖來回成本
@@ -1625,7 +1666,15 @@ if __name__ == "__main__":
 
     want_exits = "--exits" in args
     res = run(limit_days=limit, exits=EXIT_PRESETS if want_exits else None)
-    rows = summarize(res)
+    series = {}
+    rows = summarize(res, series)
+    # 主站「事件」頁的累計圖用；照方向、逐日平均，畫圖時累加（不是資金曲線）
+    ev = list(res["eval_days"])
+    compact = {k: {h: [m.get(d) for d in ev] for h, m in hs.items()} for k, hs in series.items()}
+    with open(os.path.join(here, "data", "bt_series.json"), "w", encoding="utf-8") as fh:
+        json.dump({"days": len(ev), "from": ev[0], "to": ev[-1], "dates": ev,
+                   "note": "照方向的每日平均超額（%），null＝那天沒選到；逐日累加畫圖，不是資金曲線",
+                   "series": compact}, fh, ensure_ascii=False, separators=(",", ":"))
     print()
     print(fmt_table(rows, res))
     out = {"rows": rows,
