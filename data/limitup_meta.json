@@ -1,6 +1,6 @@
 {
  "version": "limitup_list v1（2026-10-10）",
- "generated_at": "2026-10-26T22:46:37+08:00",
+ "generated_at": "2026-10-27T03:45:03+08:00",
  "source": "官方收盤行情（data/stock/<代號>.txt：證交所 MI_INDEX／櫃買上櫃行情，歷史由 FinMind 補齊），未還原除權息",
  "price_data_last_date": "20261022",
  "start": "20260911",
