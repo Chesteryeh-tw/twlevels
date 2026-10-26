@@ -212,7 +212,8 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
     </section>
 
     <section class="card sec">
-      <h2>籌碼事件 <span class="badge" title="講義沒給門檻，天數與倍數可自己調">自訂定義・未驗證</span></h2>
+      <h2>籌碼事件 <span class="badge" title="講義沒給門檻，天數與倍數可自己調">自訂定義・未驗證</span>
+        <label class="mu" style="font-size:12px;font-weight:400;margin-left:auto;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="evShow"> 在 K 線上標記</label></h2>
       <div class="rg">
         <label class="mu" style="font-size:12px">連續 <input type="number" id="evN" min="2" max="30" step="1"> 天</label>
         <label class="mu" style="font-size:12px">爆量 ≥ 5日均量 × <input type="number" id="evK" min="1.5" max="20" step="0.5"></label>
@@ -273,7 +274,7 @@ var S = {
   bk:{}, cls:{}, status:{}, mpRows:0,  // 分點：bk[code][date] = rows
   sel:null, days:1, side:'buy', months:6,
   track:[],                          // 追蹤中的分點名稱
-  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:true},
+  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:false},
   range:null, picking:false,         // 區間累計：{from,to}（YYYYMMDD）
   cfg:{evN:3, evK:5, occN:10, bhW:20} // 籌碼事件連續天數、爆量倍數、分點占量天數、行為觀察天數（使用者可改）
 };
@@ -854,10 +855,11 @@ function drawEvents(){
   var last=evs.slice(-10).reverse();
   $('evOut').innerHTML = last.length ? last.map(function(e){
     return '<li><span class="'+(e.up===1?'r':(e.up===0?'g':'mu'))+'">'+esc(e.txt)+'</span><span class="mono mu">'+iso(e.d)+'</span></li>'; }).join('')+
-    '<li class="mu" style="border:0">圖上：外／投／主＝轉向或連續、量＝爆量、低＝60 日最低量</li>' :
+    '<li class="mu" style="border:0">圖上記號：外＝外資、投＝投信連買賣後轉向；主＝主力連買／連賣；量＝爆量；低＝60 日最低量。紅↑偏多、綠↓偏空、灰●只是量的狀態</li>' :
     '<li class="mu" style="border:0">這段期間沒有符合的事件</li>';
 }
-$('evN').value=S.cfg.evN; $('evK').value=S.cfg.evK;
+$('evN').value=S.cfg.evN; $('evK').value=S.cfg.evK; $('evShow').checked=!!S.panes.ev;
+$('evShow').onchange=function(){ S.panes.ev=this.checked; saveUI(); renderPaneMenu(); drawEvents(); };
 $('evN').onchange=function(){ var v=+this.value; if(v>=2&&v<=30){ S.cfg.evN=Math.round(v); saveUI(); drawEvents(); } };
 $('evK').onchange=function(){ var v=+this.value; if(v>=1.5&&v<=20){ S.cfg.evK=v; saveUI(); drawEvents(); } };
 
@@ -1033,7 +1035,8 @@ function renderPaneMenu(){
     return '<label><input type="checkbox" data-k="'+p[0]+'"'+(S.panes[p[0]]?' checked':'')+'> '+p[1]+'</label>'; }).join('')+
     '<div class="hint">副圖之間的分隔線可以拖曳調整高度。</div>';
   Array.prototype.forEach.call(document.querySelectorAll('#panePop input'),function(cb){
-    cb.onchange=function(){ S.panes[cb.getAttribute('data-k')]=cb.checked; saveUI(); buildChart(); };
+    cb.onchange=function(){ var k=cb.getAttribute('data-k'); S.panes[k]=cb.checked; saveUI();
+      if(k==='ev'){ $('evShow').checked=cb.checked; drawEvents(); } else buildChart(); };
   });
 }
 $('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
