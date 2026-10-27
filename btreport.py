@@ -29,6 +29,15 @@ CONTROL = {"rnd10", "rnd30", "rnd60"}
 # 不該取決於誰的手續費折數 —— 所以成本只出現在說明，不出現在判準裡。
 COST = {"1": 0.235, "5": 0.386, "10": 0.386, "20": 0.386}
 
+
+def net_daily(r, h):
+    """每日等權的淨（2026-10-27）：照方向的每日平均原始報酬 − 成本；舊 backtest.json 沒有 mean_d 就回 None。"""
+    x = (r.get("h") or {}).get(h) if h else None
+    if not x or x.get("mean_d") is None:
+        return None
+    s = -1 if r.get("side") == "空" else 1
+    return s * x["mean_d"] - COST.get(str(h), 0.386)
+
 # 持有期 → 人話
 SCALE = {"1": "隔日", "5": "一週", "10": "兩週", "20": "波段"}
 
@@ -513,13 +522,15 @@ def main():
     for r in rows:
         is_ctl = r["key"] in CONTROL
         tag, tcls, tag_h, tag_why, tag_net = tags[r["key"]]
+        tag_netd = net_daily(r, tag_h)
         tr = '<tr class="ctl">' if is_ctl else "<tr>"
         tr += '<td class="l">%s</td>' % r["name"]
         net_html = ""
         if tag_net is not None:
-            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本。'
+            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本（每筆等權）。括號是每日等權：先每天平均再平均。'
                         '絕對值小於 0.15%% 就當作沒賺 —— 滑價就不只這個數。">'
-                        '淨 %s</span>' % (net_cls(tag_net), pct(tag_net)))
+                        '淨 %s%s</span>' % (net_cls(tag_net), pct(tag_net),
+                                            '' if tag_netd is None else '（每日 %s）' % pct(tag_netd)))
         tr += '<td class="l"><span class="tag %s" title="%s">%s</span>%s</td>' % (
             tcls, tag_why, tag, net_html)
         tr += '<td><span class="side">%s</span></td>' % r["side"]
@@ -551,12 +562,14 @@ def main():
     for r in rows:
         is_ctl = r["key"] in CONTROL
         tag, tcls, tag_h, tag_why, tag_net = tags[r["key"]]
+        tag_netd = net_daily(r, tag_h)
         body.append('<div class="pc%s">' % (" ctl" if is_ctl else ""))
         net_html = ""
         if tag_net is not None:
-            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本。'
+            net_html = ('<span class="net %s" title="原始報酬扣掉來回成本（每筆等權）。括號是每日等權：先每天平均再平均。'
                         '絕對值小於 0.15%% 就當作沒賺 —— 滑價就不只這個數。">'
-                        '淨 %s</span>' % (net_cls(tag_net), pct(tag_net)))
+                        '淨 %s%s</span>' % (net_cls(tag_net), pct(tag_net),
+                                            '' if tag_netd is None else '（每日 %s）' % pct(tag_netd)))
         body.append('<div class="hd"><b>%s</b><span class="tag %s" title="%s">%s</span>%s'
                     '<span class="side">%s</span></div>'
                     % (r["name"], tcls, tag_why, tag, net_html, r["side"]))

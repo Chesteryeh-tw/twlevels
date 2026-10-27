@@ -1124,6 +1124,12 @@ def summarize(res, series=None):
                 if b is not None:
                     by_day[dd].append(r - b)
             daily = [sum(v) / len(v) for _, v in sorted(by_day.items())]
+            # 2026-10-27：每日等權（先每天平均再平均）的原始報酬與超額，跟每筆等權的 mean／excess 並列
+            by_day_raw = defaultdict(list)
+            for r, b, bmd, dd in recs:
+                by_day_raw[dd].append(r)
+            mean_d = (sum(sum(v) / len(v) for v in by_day_raw.values()) / len(by_day_raw)) if by_day_raw else None
+            excess_d = (sum(daily) / len(daily)) if daily else None
             t, sd = None, None
             if len(daily) >= 20:      # 樣本天數太少的話 t 值只是巧合，不給
                 m = sum(daily) / len(daily)
@@ -1149,7 +1155,7 @@ def summarize(res, series=None):
             monthly = {m: sum(v) / len(v) for m, v in sorted(by_month.items())}
 
             row["h"][h] = dict(n=n, mean=mean_r, median=med, win=win,
-                               excess=mean_e, beat=beat,
+                               excess=mean_e, beat=beat, mean_d=mean_d, excess_d=excess_d,
                                t=t, sd_daily=sd, n_days=len(daily),
                                pos_days=pos_days, monthly=monthly,
                                states=dict(res["states"][pname].get(h, {}))

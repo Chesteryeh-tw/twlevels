@@ -20,7 +20,7 @@ def main(src="backtest.json", dst=os.path.join("data", "bt_tags.json")):
         x = (r.get("h") or {}).get(h) or {}
         out["tags"][k] = {"name": r.get("name"), "side": r.get("side"), "tag": tag, "cls": css,
                           "h": h, "t": x.get("t"), "excess": x.get("excess"),
-                          "net": net, "why": why,
+                          "net": net, "net_d": R.net_daily(r, h) if net is not None else None, "why": why,
                           # 2026-10-26 加給「事件」頁：照方向的勝率、賺賠比、最大回落、筆數
                           "win": x.get("win_dir"), "payoff": x.get("payoff"),
                           "mdd": x.get("mdd"), "n": x.get("n"),
