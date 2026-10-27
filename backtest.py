@@ -382,6 +382,17 @@ PRESETS = {
                                                    wmin=10, bwy=15, pv10=1.2)),
     "b1s": ("開布林·擠壓 ≥ 20 天才開（不要碰③）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
                                                   wmin=10, bwy=15, sqd=20)),
+    # ── 2026-10-27：布林「喇叭口」開口（使用者 10-27：光寶科 02-05～02-09 是逐漸打開，原 b1 抓不到）。
+    #    定義照網路教學文字（看結果前寫死，不用近一年挑門檻）：
+    #    喇叭口＝上軌往上（上通斜率 > 0）且下軌往下（下通斜率 < 0），而且帶寬今天、昨天都變寬（逐漸打開）；
+    #    往上＝收盤在中軌以上、量 ≥ 20 日均量 1.5 倍（squeeze 突破文章的量條件）；往下鏡像（收盤在中軌以下）。
+    #    只算第一天（昨天還不是同方向喇叭口）。「先擠壓」＝前 10 天內帶寬曾落在自己過去 125 天的最低 20%
+    #    （OANDA：用約 125 根 K 線比相對高低；squeeze 文章：自己歷史的最低 10～20%）。
+    #    事先登記（2026-10-27）：樣本外 2021-02～2025-08、持有 10 天，照方向超額 > 0、t ≥ 2、淨 > 0 才算通過。
+    "h1": ("喇叭口·往上（首日）", "多", dict(val=1, horn="U", vr=1.5)),
+    "h2": ("喇叭口·往上＋先擠壓", "多", dict(val=1, horn="U", vr=1.5, sqp=20)),
+    "h3": ("喇叭口·往下（首日）", "空", dict(val=1, horn="D", vr=1.5)),
+    "h4": ("喇叭口·往下＋先擠壓", "空", dict(val=1, horn="D", vr=1.5, sqp=20)),
     # b4：教材「上通斜率在高點、沿著布林上軌 ＝ 強勢上漲發動中」。
     #     跟 b1（擠壓→剛打開）是兩件事：b1 抓發動那一天，b4 抓發動中。
     #     狀態轉移統計：這批股票 5 天內掉到中軌以下只有 4.4%，
@@ -728,6 +739,12 @@ def passes(s, base, d, k):
             return False
         if g("first") == 0 and not opened:
             return False
+    # horn：U／D＝今天是往上／往下喇叭口的第一天；sqp：前 10 天帶寬百分位（自己過去 125 天）最低值的上限
+    if g("horn") is not None:
+        if d.get("_horn") != g("horn") or d.get("_hornPrev") is None or d["_hornPrev"] == g("horn"):
+            return False
+    if g("sqp") is not None and (d.get("_sqp10") is None or d["_sqp10"] > g("sqp")):
+        return False
     # pv10：前 10 天均量 ÷ 前 60 天均量下限（不要碰②）；sqd：到昨天為止連續帶寬 ≤ 10% 的天數下限（不要碰③）
     if g("pv10") is not None and (d.get("_pv10") is None or d["_pv10"] <= g("pv10")):
         return False
@@ -872,6 +889,8 @@ def run(limit_days=None, verbose=True, exits=None, collect=None):
               for code, st in stocks.items()}
 
     last_d = {}   # code -> (i, 指標)，前一天的指標
+    horn_last = {}   # code -> (i, 那天的喇叭口方向)
+    bw_hist = {}     # code -> [(i, 帶寬, 百分位)]
     sq_run = {}   # code -> (i, 到 i 為止連續帶寬 ≤ 10% 的天數；None＝不明)
     revenue = load_revenue()
     for dn_i, day in enumerate(eval_days):
@@ -906,6 +925,26 @@ def run(limit_days=None, verbose=True, exits=None, collect=None):
             else:
                 run_ = None if d["_sq"] is None else d["_sq"] + 1   # 前面斷掉或不明：連續天數不明
             sq_run[code] = (i, run_)
+            # 喇叭口：上軌升、下軌降、帶寬今天和昨天都變寬；方向看收盤在中軌上（U）或下（D）
+            su_, sl_, wc_ = d.get("slopeUp"), d.get("slopeLo"), d.get("bbWChg")
+            hz = None
+            if None not in (su_, sl_, wc_, d.get("_pW"), d.get("bbPos")):
+                if su_ > 0 and sl_ < 0 and wc_ > 0 and d["_pW"] > 0:
+                    hz = "U" if d["bbPos"] >= 0 else "D"
+            d["_horn"] = hz
+            ph_ = horn_last.get(code)
+            d["_hornPrev"] = (ph_[1] or "-") if (ph_ is not None and ph_[0] == i - 1) else None
+            horn_last[code] = (i, hz)
+            # 帶寬在自己過去 125 天的百分位（0＝最窄）；_sqp10＝前 10 天（不含今天）的最低百分位
+            bh_ = bw_hist.setdefault(code, [])
+            if bw_ is not None:
+                prev_ = [w for (_, w, _) in bh_[-125:]]
+                pc_ = (sum(1 for w in prev_ if w < bw_) / len(prev_) * 100) if len(prev_) >= 125 else None
+                bh_.append((i, bw_, pc_))
+                if len(bh_) > 200:
+                    del bh_[:len(bh_) - 200]
+            rec_ = [pc for (j, _, pc) in bh_ if i - 10 <= j <= i - 1 and pc is not None]
+            d["_sqp10"] = min(rec_) if len(rec_) >= 8 else None
             # 不要碰②：前 10 天均量 ÷ 前 60 天均量（都不含今天）
             if i >= 60:
                 a10 = sum(st["lot"][i - 10:i]) / 10

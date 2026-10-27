@@ -80,6 +80,11 @@ jobs:
         continue-on-error: true
         run: python chipstock.py data
 
+      # 2026-10-27：K 線型態（籌碼看板主圖用，最近 250 天；未驗證）
+      - name: K 線型態
+        continue-on-error: true
+        run: python patterns.py --site 250
+
       - name: 有變動就存回倉庫
         run: |
           git config user.name  "github-actions[bot]"
