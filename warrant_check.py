@@ -3,6 +3,7 @@
 
   A：自營商以外的淨股數（≠0 的權證）：筆數、加總、sha（排序後「代號:淨股數」）
   B：有成交的權證（成交股數 > 0）：筆數、成交股數加總、成交金額加總、sha（「代號:股數:金額」）
+  C：同 B，但只算淨股數 ≠ 0 的權證（H5 實際用到的）
 
 用法：
   python warrant_check.py --derived 起日 迄日       讀 Actions 快取 data/warrant_raw/derived/（T86 權證類別＋MI_INDEX）
@@ -18,8 +19,12 @@ def fp(nd, vam):
     b = sorted((c, v, m) for c, (v, m) in vam.items() if v)
     ha = hashlib.sha256(";".join("%s:%d" % x for x in a).encode()).hexdigest()[:10]
     hb = hashlib.sha256(";".join("%s:%d:%d" % x for x in b).encode()).hexdigest()[:10]
-    return "A %d %d %s｜B %d %d %d %s" % (len(a), sum(v for _, v in a), ha,
-                                         len(b), sum(v for _, v, _ in b), sum(m for _, _, m in b), hb)
+    # C：只看淨股數 ≠ 0 的權證（H5 真正用到的）的成交股數、金額
+    c = sorted((k, v, m) for k, (v, m) in vam.items() if v and nd.get(k))
+    hc = hashlib.sha256(";".join("%s:%d:%d" % x for x in c).encode()).hexdigest()[:10]
+    return "A %d %d %s｜B %d %d %d %s｜C %d %d %d %s" % (len(a), sum(v for _, v in a), ha,
+                                         len(b), sum(v for _, v, _ in b), sum(m for _, _, m in b), hb,
+                                         len(c), sum(v for _, v, _ in c), sum(m for _, _, m in c), hc)
 
 
 def n(s):
@@ -108,8 +113,8 @@ def main():
     if args and args[0] == "--derived":
         a, b = args[1], args[2]
         lines = ["%s %s" % (d, from_derived(d)) for d in days_between(a, b, "derived")]
-        for i in range(0, len(lines), 5):          # 一個註記放 5 天（一步最多 10 個註記）
-            print("::notice title=權證核對指紋（T86）::" + " ‖ ".join(lines[i:i + 5]))
+        for i in range(0, len(lines), 4):          # 一個註記放 4 天（一步最多 10 個註記）
+            print("::notice title=權證核對指紋（T86）::" + " ‖ ".join(lines[i:i + 4]))
     elif args and args[0] == "--gpt":
         folder, a, b = args[1], args[2], args[3]
         for d in days_between(a, b, folder):
