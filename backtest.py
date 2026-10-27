@@ -373,6 +373,15 @@ PRESETS = {
                                         wmin=10, bwy=15, first=1, rnew=1)),
     "b1fq": ("開布林·首日·營收沒創新高（對照）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
                                             wmin=10, bwy=15, first=1, rnew=0)),
+    # ── 2026-10-27：研究_開布林 第 4 節「不要碰」②③ 補進回測。原始研究程式不在 10-25 備份裡，
+    #    定義照研究_開布林_濾網測試 第 4 節的文字重建（判定時要註明是重建）：
+    #    ② 前 10 天均量 ÷ 前 60 天均量（都不含今天）> 1.2，且今天均量比 > 5；
+    #    ③ 到昨天為止連續「帶寬 ≤ 10%」≥ 20 天才打開。
+    #    事先登記（研究_開布林 第 6 節）：樣本外 2021-02～2025-08 的 10 天超額仍 < 0。
+    "b1v": ("開布林·前已放量＋爆量 5 倍（不要碰②）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=5,
+                                                   wmin=10, bwy=15, pv10=1.2)),
+    "b1s": ("開布林·擠壓 ≥ 20 天才開（不要碰③）", "多", dict(val=1, wchg=0.5, supt2=1, bpos1=0, chg1=1, vr=1.5,
+                                                  wmin=10, bwy=15, sqd=20)),
     # b4：教材「上通斜率在高點、沿著布林上軌 ＝ 強勢上漲發動中」。
     #     跟 b1（擠壓→剛打開）是兩件事：b1 抓發動那一天，b4 抓發動中。
     #     狀態轉移統計：這批股票 5 天內掉到中軌以下只有 4.4%，
@@ -719,6 +728,11 @@ def passes(s, base, d, k):
             return False
         if g("first") == 0 and not opened:
             return False
+    # pv10：前 10 天均量 ÷ 前 60 天均量下限（不要碰②）；sqd：到昨天為止連續帶寬 ≤ 10% 的天數下限（不要碰③）
+    if g("pv10") is not None and (d.get("_pv10") is None or d["_pv10"] <= g("pv10")):
+        return False
+    if g("sqd") is not None and (d.get("_sq") is None or d["_sq"] < g("sqd")):
+        return False
     # ryoy：1＝最近一期月營收年增 > 0；0＝≤ 0。沒有營收資料一律不選。
     if g("ryoy") is not None:
         y = d.get("_ryoy")
@@ -858,6 +872,7 @@ def run(limit_days=None, verbose=True, exits=None, collect=None):
               for code, st in stocks.items()}
 
     last_d = {}   # code -> (i, 指標)，前一天的指標
+    sq_run = {}   # code -> (i, 到 i 為止連續帶寬 ≤ 10% 的天數；None＝不明)
     revenue = load_revenue()
     for dn_i, day in enumerate(eval_days):
         # 這一天所有股票的指標
@@ -880,6 +895,22 @@ def run(limit_days=None, verbose=True, exits=None, collect=None):
             if pv is not None and pv[0] == i - 1:
                 d["_pW"], d["_pS"] = pv[1].get("bbWChg"), pv[1].get("slopeUp")
             last_d[code] = (i, d)
+            # 不要碰③：連續擠壓天數（帶寬 ≤ 10%）；_sq 是「到昨天為止」，今天的存進 sq_run 給明天用
+            ps_ = sq_run.get(code)
+            d["_sq"] = ps_[1] if (ps_ is not None and ps_[0] == i - 1) else None
+            bw_ = d.get("bbW")
+            if bw_ is None:
+                run_ = None
+            elif bw_ > 10:
+                run_ = 0
+            else:
+                run_ = None if d["_sq"] is None else d["_sq"] + 1   # 前面斷掉或不明：連續天數不明
+            sq_run[code] = (i, run_)
+            # 不要碰②：前 10 天均量 ÷ 前 60 天均量（都不含今天）
+            if i >= 60:
+                a10 = sum(st["lot"][i - 10:i]) / 10
+                a60 = sum(st["lot"][i - 60:i]) / 60
+                d["_pv10"] = a10 / a60 if a60 > 0 else None
             # 進場（隔天開盤）時已經看得到的最近一期月營收年增率
             rl = revenue.get(code)
             if rl:
