@@ -85,6 +85,11 @@ jobs:
         continue-on-error: true
         run: python patterns.py --site 250
 
+      # 2026-10-27：SMC／ICT 與分價量表（籌碼看板主圖用，最近 120 天；未驗證）
+      - name: SMC 與分價量表
+        continue-on-error: true
+        run: python smc.py --site 120
+
       - name: 有變動就存回倉庫
         run: |
           git config user.name  "github-actions[bot]"
