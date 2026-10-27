@@ -223,6 +223,12 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
     </section>
 
     <section class="card sec">
+      <h2>K 線型態 <span class="badge" id="patBadge" title="型態定義寫死在 patterns.py；長樣本回測結果出來前都是未驗證">未驗證</span>
+        <label class="mu" style="font-size:12px;font-weight:400;margin-left:auto;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="patShow"> 畫在 K 線上</label></h2>
+      <ul class="evl" id="patOut"></ul>
+    </section>
+
+    <section class="card sec">
       <h2>三大法人 <span class="sub">官方，張</span></h2>
       <div id="inst"></div>
     </section>
@@ -275,7 +281,7 @@ var S = {
   bk:{}, cls:{}, status:{}, mpRows:0,  // 分點：bk[code][date] = rows
   sel:null, days:1, side:'buy', months:6,
   track:[],                          // 追蹤中的分點名稱
-  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:false},
+  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:false, pat:true},
   range:null, picking:false,         // 區間累計：{from,to}（YYYYMMDD）
   cfg:{evN:3, evK:5, occN:10, bhW:20} // 籌碼事件連續天數、爆量倍數、分點占量天數、行為觀察天數（使用者可改）
 };
@@ -289,7 +295,7 @@ function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({pane
 
 var PANES = [
   ['vol','成交量＋均量線'],['main','主力買賣超'],['fgn','外資'],['inv','投信'],['dlr','自營商'],['dS','自營（自行買賣）'],['dH','自營（避險）'],['isum','三大法人合計'],
-  ['mgn','融資融券'],['qfii','外資持股比率（上市）'],['tdcc','集保大戶／散戶（每週）'],['track','分點追蹤'],['ev','籌碼事件標記（K 線上）']
+  ['mgn','融資融券'],['qfii','外資持股比率（上市）'],['tdcc','集保大戶／散戶（每週）'],['track','分點追蹤'],['ev','籌碼事件標記（K 線上）'],['pat','K 線型態（K 線上）']
 ];
 var INST={fgn:['外資','--c1'],inv:['投信','--c3'],dlr:['自營商','--c2'],dS:['自營（自行）','--c4'],dH:['自營（避險）','--c5'],isum:['三大法人合計','--c5']};
 var INSTK=['fgn','inv','dlr','dS','dH','isum'];
@@ -374,7 +380,8 @@ function loadStock(code){
     });
     return {chip:chip,tdcc:tdcc,qfii:qfii};
   }).catch(function(){ return {chip:{},tdcc:[],qfii:[]}; });
-  return Promise.all([a,b]);
+  var c=getText('data/patterns/'+encodeURIComponent(code)+'.json').then(function(t){ return JSON.parse(t)||[]; }).catch(function(){ return []; });
+  return Promise.all([a,b,c]);
 }
 
 /* ---------- 指標 ---------- */
@@ -625,7 +632,7 @@ function fillData(){
         if(n==null) return {time:p.t};   // 未上榜：留空，不當 0
         seen=true; cum+=n; return {time:p.t,value:cum}; })); });
   }
-  drawEvents();
+  drawEvents(); drawPatterns();
   placeLegends(); updateLegend(null);
 }
 // {time,value,color} → 從 0 畫到 value 的 K 棒實體
@@ -857,6 +864,8 @@ function drawEvents(){
     var ab={fgn:'外',inv:'投',main:'主',vol:'量',low:'低'};
     var mk=S.panes.ev? evs.map(function(e){ return {time:e.t, position:e.up===0?'aboveBar':'belowBar',
       color:e.up===1?css('--res'):(e.up===0?css('--sup'):css('--muted')), shape:e.up===1?'arrowUp':(e.up===0?'arrowDown':'circle'), text:ab[e.k]}; }) : [];
+    if(S.panes.pat) mk=mk.concat(patMarkers());
+    mk.sort(function(a,b){ return a.time<b.time?-1:(a.time>b.time?1:0); });
     try{ if(markerApi&&markerApi._s===ser.k) markerApi.setMarkers(mk); else { markerApi=LC.createSeriesMarkers(ser.k,mk); markerApi._s=ser.k; } }catch(e){}
   }
   var last=evs.slice(-10).reverse();
@@ -865,6 +874,50 @@ function drawEvents(){
     '<li class="mu" style="border:0">圖上記號：外＝外資、投＝投信連買賣後轉向；主＝主力連買／連賣；量＝爆量；低＝60 日最低量。紅↑偏多、綠↓偏空、灰●只是量的狀態</li>' :
     '<li class="mu" style="border:0">這段期間沒有符合的事件</li>';
 }
+/* ---------- K 線型態（patterns.py 產生 data/patterns/<代號>.json；未驗證） ---------- */
+var PAT_AB={w:'W底',m:'M頭',hsb:'頭肩底',hst:'頭肩頂',asc:'上升三角',desc:'下降三角',symu:'三角↑',symd:'三角↓',
+  boxu:'箱型↑',boxd:'箱型↓',flagu:'旗形↑',flagd:'旗形↓',cup:'杯柄',vb:'V底',vt:'V頂'};
+var BTP=null;   // data/bt_patterns.json（長樣本回測），有才顯示
+getText('data/bt_patterns.json').then(function(t){ BTP=JSON.parse(t); renderPatterns(); }).catch(function(){});
+function patInView(){ var px=S.px; if(!px.length||!S.pat) return [];
+  var a=px[0].d, b=px[px.length-1].d; return S.pat.filter(function(e){ return e.d>=a&&e.d<=b; }); }
+function patMarkers(){ return patInView().map(function(e){ var up=e.s>0;
+  return {time:iso(e.d), position:up?'belowBar':'aboveBar', color:up?css('--res'):css('--sup'), shape:up?'arrowUp':'arrowDown', text:PAT_AB[e.k]||e.t}; }); }
+function drawPatterns(){
+  if(!chart||!ser.k) return;
+  (ser.pat||[]).forEach(function(x){ try{ chart.removeSeries(x); }catch(e){} });
+  ser.pat=[];
+  if(S.panes.pat){
+    patInView().slice(-10).forEach(function(e){
+      var col=e.s>0?css('--res'):css('--sup'), seen={}, pts=[];
+      e.pts.slice().sort(function(a,b){ return a[0]<b[0]?-1:(a[0]>b[0]?1:0); }).forEach(function(p){ if(!seen[p[0]]){ seen[p[0]]=1; pts.push({time:iso(p[0]),value:p[1]}); } });
+      if(pts.length<2) return;
+      var z=chart.addSeries(LC.LineSeries,{color:col,lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,pointMarkersVisible:true,pointMarkersRadius:2},0);
+      z.setData(pts); ser.pat.push(z);
+      var nk=chart.addSeries(LC.LineSeries,{color:col,lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
+      nk.setData(pts[0].time===iso(e.d)?[{time:iso(e.d),value:e.neck}]:[{time:pts[0].time,value:e.neck},{time:iso(e.d),value:e.neck}]); ser.pat.push(nk);
+    });
+  }
+  renderPatterns();
+}
+function patStat(t){ if(!BTP||!BTP.types||!BTP.types[t]) return '';
+  var r=BTP.types[t], m=r.base&&r.base[String(BTP.meta.main_h)]&&r.base[String(BTP.meta.main_h)].pre;
+  if(!m) return '';
+  return ' <span class="badge'+(r.pass?'':' warn')+'" title="長樣本 2021-02～2025-08、抱 '+BTP.meta.main_h+' 天、照方向比大盤：'+
+    (m.ex>=0?'+':'')+m.ex.toFixed(2)+'%（t '+(m.t==null?'—':m.t)+'），淨 '+(m.net>=0?'+':'')+m.net.toFixed(2)+'%">'+(r.pass?'回測通過':'測不出來')+'</span>'; }
+function renderPatterns(){
+  if(!$('patOut')) return;
+  if(BTP) $('patBadge').textContent='回測見各列'; 
+  var v=patInView().slice(-8).reverse();
+  $('patOut').innerHTML = v.length ? v.map(function(e){
+    return '<li><span><span class="'+(e.s>0?'r':'g')+'">'+esc(e.t)+'</span>'+(e.vol?' <span class="mu">帶量</span>':'')+patStat(e.t)+
+      '<br><span class="mu" style="font-size:11.5px">頸線 '+e.neck+'・目標 '+e.tgt+'・停損 '+e.stop+'</span></span><span class="mono mu">'+iso(e.d)+'</span></li>'; }).join('')+
+    '<li class="mu" style="border:0">只用當天以前的資料；訊號日＝收盤第一次突破（跌破）頸線。紅↑多方型態、綠↓空方型態；實線連轉折點、虛線是頸線。目標、停損只是型態量法，不是建議</li>' :
+    '<li class="mu" style="border:0">這段期間沒有辨識到型態</li>';
+}
+$('patShow').checked=!!S.panes.pat;
+$('patShow').onchange=function(){ S.panes.pat=this.checked; saveUI(); renderPaneMenu(); drawEvents(); drawPatterns(); };
+
 $('evN').value=S.cfg.evN; $('evK').value=S.cfg.evK; $('evShow').checked=!!S.panes.ev;
 $('evShow').onchange=function(){ S.panes.ev=this.checked; saveUI(); renderPaneMenu(); drawEvents(); };
 $('evN').onchange=function(){ var v=+this.value; if(v>=2&&v<=30){ S.cfg.evN=Math.round(v); saveUI(); drawEvents(); } };
@@ -1043,7 +1096,7 @@ function renderPaneMenu(){
     '<div class="hint">副圖之間的分隔線可以拖曳調整高度。</div>';
   Array.prototype.forEach.call(document.querySelectorAll('#panePop input'),function(cb){
     cb.onchange=function(){ var k=cb.getAttribute('data-k'); S.panes[k]=cb.checked; saveUI();
-      if(k==='ev'){ $('evShow').checked=cb.checked; drawEvents(); } else buildChart(); };
+      if(k==='ev'){ $('evShow').checked=cb.checked; drawEvents(); } else if(k==='pat'){ $('patShow').checked=cb.checked; drawEvents(); drawPatterns(); } else buildChart(); };
   });
 }
 $('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
@@ -1119,7 +1172,7 @@ function open(code){
   }
   $('info').textContent='載入 '+code+'…';
   loadStock(code).then(function(r){
-    S.code=code; S.px=r[0]; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
+    S.code=code; S.px=r[0]; S.pat=r[2]||[]; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
     S.sel = S.px.length ? S.px[S.px.length-1].d : null;
     // 有分點資料時，預設選最後一個有分點的交易日
     var bk=S.bk[code]; if(bk){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
