@@ -16,6 +16,10 @@ on:
         description: "另外跑一次公司行動調整版（除權息、減資、面額變更），存成 backtest_adj.json，不蓋原本的"
         type: boolean
         default: false
+      explore:
+        description: "重算回測工具（單一條件與兩兩組合、做多做空），存成 data/bt_explore*.json"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -124,6 +128,11 @@ jobs:
         if: inputs.mode == 'full' && inputs.adjust
         run: python backtest.py --exits --adjust
 
+      # 2026-10-27：回測工具（bt.html）的資料
+      - name: 回測工具
+        if: inputs.mode == 'full' && inputs.explore
+        run: python bt_explore.py
+
       # 只 commit 報告，不 commit 原始歷史 —— 那 110 MB 留在快取裡就好，
       # 進了 repo 之後每次 checkout 都要多下載一次，而且永遠刪不掉。
       - name: 推回報告
@@ -134,7 +143,7 @@ jobs:
           # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
           run_git(){ out=$("$@" 2>&1); rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
           ls -la data/bt_series.json backtest.json data/bt_tags.json || true
-          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json 2>/dev/null)
+          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_curve_1.json data/bt_explore_curve_10.json 2>/dev/null)
           if git diff --cached --quiet; then
             echo "沒有變動"
           else

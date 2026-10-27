@@ -807,7 +807,7 @@ def base_metrics(st, i, kshares):
     }
 
 
-def run(limit_days=None, verbose=True, exits=None):
+def run(limit_days=None, verbose=True, exits=None, collect=None):
     stocks = load_stocks()
     info = load_market_meta()
     chip_ds, chip_cache = load_chip_days()
@@ -956,6 +956,10 @@ def run(limit_days=None, verbose=True, exits=None):
                 k = chip_row(code, di, chip_ds, chip_cache, price_hist, mkt, None)
                 if k:
                     krows[code] = k
+
+        # 2026-10-27：給 bt_explore.py（回測工具）收集每檔每天的條件與報酬；只讀不改
+        if collect is not None:
+            collect(day, rows, bm, krows)
 
         has240 = any(r[3].get("biasY") is not None for r in rows)
         for pname, (label, side, spec) in PRESETS.items():

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A1015">
+<title>回測工具</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#E9EDEF; --surface:#FFFFFF; --surface2:#F3F6F7; --sunk:#DFE6EA;
+  --text:#121A1F; --muted:#5C6E79; --line:#CFD9DF; --line2:#E4EAEE;
+  --accent:#155E7E; --accent-ink:#FFFFFF; --accent-soft:#DBEAF1;
+  --res:#C43A31; --res-bg:#F9E4E1; --mid:#9E7106; --mid-bg:#FAEFD6; --sup:#0C8A61; --sup-bg:#DAF2E7;
+  --shadow:0 1px 2px rgba(18,26,31,.06), 0 6px 18px -12px rgba(18,26,31,.35);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+    --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+    --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+    --res:#FF7C6C; --res-bg:#331A1A; --mid:#EFC257; --mid-bg:#322913; --sup:#43CF91; --sup-bg:#0E2E23;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+  --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+  --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+  --res:#FF7C6C; --res-bg:#331A1A; --mid:#EFC257; --mid-bg:#322913; --sup:#43CF91; --sup-bg:#0E2E23;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 "Noto Sans TC",system-ui,-apple-system,"Microsoft JhengHei",sans-serif}
+button,select,input{font:inherit;color:inherit}
+a{color:var(--accent)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.top{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:12px 16px;background:var(--sunk);border-bottom:1px solid var(--line)}
+.top h1{font-size:17px;margin:0}
+.top a{font-size:13px;text-decoration:none}
+.wrap{max-width:980px;margin:0 auto;padding:14px 16px 48px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line2);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ctl label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+.ctl select{width:100%;min-height:40px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface2)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--surface2);padding:8px 14px;cursor:pointer;min-height:40px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.lg{display:flex;gap:12px;font-size:12px;color:var(--muted)}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:baseline}
+.head b{font-size:16px}
+.tag{border-radius:6px;padding:2px 8px;font-size:12px;font-weight:500;background:var(--surface2);color:var(--muted)}
+.tag.p{background:var(--res-bg);color:var(--res)} .tag.n{background:var(--sup-bg);color:var(--sup)} .tag.w{background:var(--mid-bg);color:var(--mid)}
+.kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
+.kpi div{background:var(--surface2);border-radius:8px;padding:6px 10px;min-width:0}
+.kpi small{display:block;font-size:11px;color:var(--muted)}
+.kpi b{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500}
+.p{color:var(--res)} .n{color:var(--sup)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin-top:10px}
+.checks span::before{content:"✗ ";color:var(--muted)}
+.checks span.ok::before{content:"✓ ";color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:500;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+.tw{overflow-x:auto}
+svg.cv{width:100%;height:140px;display:block;margin-top:8px}
+.cap{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+tr.go{cursor:pointer} tr.go:hover td{background:var(--surface2)}
+.code{display:flex;gap:8px;align-items:center;margin-top:8px}
+.code input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);font-family:"IBM Plex Mono",monospace;font-size:12px}
+.btn{border:1px solid var(--line);background:var(--surface2);border-radius:8px;padding:6px 12px;cursor:pointer;min-height:36px}
+details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px;display:flex;align-items:center}
+#rank td:first-child{min-width:9.5em}
+@media (max-width:620px){ .kpi{grid-template-columns:repeat(2,minmax(0,1fr))} .ctl{grid-template-columns:minmax(0,1fr)} .hm{display:none} }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>回測工具</h1>
+  <a href="./">← 三線點位</a>
+  <a href="chips.html">籌碼看板</a>
+  <span class="note" id="meta"></span>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <div class="seg" id="dir"><button data-v="L" class="on">做多</button><button data-v="S">做空</button></div>
+        <div class="seg" id="hold"><button data-v="1">抱 1 天</button><button data-v="5">5</button><button data-v="10" class="on">10</button><button data-v="20">20</button></div>
+      </div>
+      <span class="lg"><span><i style="background:var(--res)"></i>照這方向做有賺</span><span><i style="background:var(--sup)"></i>賠</span></span>
+    </div>
+    <div class="ctl" style="margin-top:10px">
+      <label>條件一<select id="c1"></select></label>
+      <label>條件二（可不選）<select id="c2"></select></label>
+    </div>
+    <p class="note" id="warn" style="margin-top:8px"></p>
+  </section>
+
+  <section class="card" id="res"><p class="note">載入中…</p></section>
+
+  <section class="card">
+    <div class="head"><b>排行</b><span class="note" id="rkSub"></span></div>
+    <p class="note" style="margin:4px 0 8px">同方向、同持有天數，t 值最高的 20 組。點一列看細節。組合越多越容易碰巧好看，先看「兩段都成立」。</p>
+    <div class="tw" id="rank"></div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>三個以上條件：產生回測代碼</summary>
+      <p class="note">選好的兩個條件加上你想再加的，複製代碼貼給 Claude，跑完會加進這頁。</p>
+      <div class="ctl" style="margin-top:8px"><label>條件三<select id="c3"></select></label></div>
+      <div class="code"><input id="codeOut" readonly aria-label="回測代碼"><button class="btn" id="copy">複製</button></div>
+    </details>
+    <p class="note" style="margin-top:8px">做法：訊號日收盤篩選（成交金額 ≥ 1 億）→ 隔天開盤進 → 抱滿天數收盤出。超額＝減同日全市場平均；t 用每個進場日的平均；淨＝扣隔夜成本 0.386%。勝率＝照方向報酬 &gt; 0 的比例；賺賠比＝平均賺 ÷ 平均賠。價格未還原除權息。這是探索工具，數字好看不等於可以用，要先事先登記再驗證。</p>
+  </section>
+</main>
+
+<script>
+(function(){
+'use strict';
+var $=function(id){ return document.getElementById(id); };
+var D=null, CV={}, S={dir:'L',h:'10',c1:'',c2:''};
+try{ var sv=JSON.parse(localStorage.getItem('twlvBT')||'{}'); for(var k in sv) if(k in S) S[k]=sv[k]; }catch(e){}
+function save(){ try{ localStorage.setItem('twlvBT',JSON.stringify(S)); }catch(e){} }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function nn(x){ return x!==null&&x!==undefined&&isFinite(x); }
+function pc(x,d){ return nn(x)?(x>0?'+':'')+x.toFixed(d==null?2:d)+'%':'—'; }
+function cl(x){ return nn(x)&&x!==0?(x>0?'p':'n'):''; }
+function lab(k){ var c=D.meta.conditions; for(var i=0;i<c.length;i++) if(c[i][0]===k) return c[i][1]; return k; }
+function key(a,b){
+  if(!a&&!b) return null; if(!b) return a; if(!a) return b; if(a===b) return a;
+  var ks=D.meta.conditions.map(function(c){return c[0];});
+  return ks.indexOf(a)<ks.indexOf(b) ? a+'|'+b : b+'|'+a;
+}
+function verdict(x){
+  var preOk = x.pre && x.pre[0]>=30 && nn(x.pre[1]) && x.pre[1]>0 && nn(x.pre[2]) && x.pre[2]>=2;
+  var c=[{ok:x.net>0,t:'淨 > 0'},{ok:nn(x.t)&&x.t>=2&&x.ex>0,t:'贏大盤且 t ≥ 2'},{ok:preOk,t:'2021-02～2025-08 也成立'}];
+  var tag;
+  if(c[0].ok&&c[1].ok&&c[2].ok) tag=['p','兩段都成立'];
+  else if(c[1].ok&&!c[0].ok) tag=['w','贏大盤但賠錢'];
+  else if(nn(x.t)&&x.t<=-2) tag=['n','反指標'];
+  else if(c[0].ok&&c[1].ok) tag=['w','只在部分期間'];
+  else tag=['','測不出來'];
+  return {checks:c, tag:tag};
+}
+function opts(sel,val,none){
+  sel.innerHTML=(none?'<option value="">（不加）</option>':'')+D.meta.conditions.map(function(c){
+    return '<option value="'+esc(c[0])+'"'+(c[0]===val?' selected':'')+'>'+esc(c[1])+'</option>'; }).join('');
+}
+function render(){
+  if(!S.c1) S.c1=D.meta.conditions[0][0];
+  var k=key(S.c1,S.c2), x=D.combos[k]&&D.combos[k][S.h]&&D.combos[k][S.h][S.dir];
+  var name=lab(S.c1)+(S.c2&&S.c2!==S.c1?' ＋ '+lab(S.c2):'');
+  var dn=S.dir==='L'?'做多':'做空';
+  if(!x){ $('res').innerHTML='<div class="head"><b>'+esc(name)+'</b><span class="tag">樣本不足</span></div><p class="note">這個組合少於 '+D.meta.min_trades+' 筆、或同時成立的日子太少（例如互相矛盾的條件），不顯示。</p>'; codeOut(); return; }
+  var v=verdict(x), yrs=Object.keys(x.yr||{});
+  var h=['<div class="head"><b>'+esc(name)+'</b><span class="tag '+v.tag[0]+'">'+v.tag[1]+'</span></div>',
+    '<p class="note">'+dn+'、抱 '+S.h+' 天｜'+x.n.toLocaleString('en-US')+' 筆、'+x.nd+' 個進場日</p>',
+    '<div class="kpi">',
+    '<div><small>勝率</small><b>'+x.win.toFixed(1)+'%</b></div>',
+    '<div><small>賺賠比</small><b>'+(nn(x.pay)?x.pay.toFixed(2):'—')+'</b></div>',
+    '<div><small>平均賺／賠</small><b><span class="p">'+pc(x.aw,1)+'</span> <span class="n">'+pc(x.al,1)+'</span></b></div>',
+    '<div><small>淨（扣成本）</small><b class="'+cl(x.net)+'">'+pc(x.net)+'</b></div>',
+    '<div><small>超額</small><b class="'+cl(x.ex)+'">'+pc(x.ex)+'</b></div>',
+    '<div><small>t 值</small><b>'+(nn(x.t)?x.t.toFixed(1):'—')+'</b></div>',
+    '<div><small title="累計超額從高點往下最大的一段">最大回落</small><b>'+x.mdd.toFixed(1)+' 點</b></div>',
+    '<div><small>2025-09 以後</small><b class="'+cl(x.post[1])+'">'+pc(x.post[1])+'</b></div>',
+    '</div>',
+    '<div class="checks">'+v.checks.map(function(c){ return '<span class="'+(c.ok?'ok':'')+'">'+c.t+'</span>'; }).join('')+'</div>',
+    '<div id="cv"></div>'];
+  if(yrs.length) h.push('<div class="tw" style="margin-top:8px"><table class="mono"><thead><tr><th>每年超額</th>'+yrs.map(function(y){return '<th>'+y+'</th>';}).join('')+'</tr></thead><tbody><tr><td>照方向</td>'+
+    yrs.map(function(y){ return '<td class="'+cl(x.yr[y])+'">'+pc(x.yr[y])+'</td>'; }).join('')+'</tr></tbody></table></div>');
+  $('res').innerHTML=h.join('');
+  curve(k); codeOut();
+}
+function curve(k){
+  var el=$('cv'); if(!el) return;
+  var hz=S.h==='1'||S.h==='10'?S.h:null;
+  if(!hz){ el.innerHTML='<p class="note" style="margin-top:8px">累計曲線只有抱 1 天、10 天兩種。</p>'; return; }
+  if(!CV[hz]){ el.innerHTML='<p class="note" style="margin-top:8px">曲線讀取中…</p>';
+    fetch('data/bt_explore_curve_'+hz+'.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
+      .then(function(j){ CV[hz]=j||{curves:{}}; if(S.h===hz) curve(key(S.c1,S.c2)); }).catch(function(){ CV[hz]={curves:{}}; });
+    return; }
+  var pts=CV[hz].curves[k]; if(!pts||!pts.length){ el.innerHTML=''; return; }
+  var sg=S.dir==='L'?1:-1; pts=pts.map(function(v){return v*sg;});
+  var lo=Math.min(0,Math.min.apply(null,pts)), hi=Math.max(0,Math.max.apply(null,pts)); if(hi===lo) hi=lo+1;
+  var W=600,H=140, X=function(i){ return 4+i*(W-8)/Math.max(1,pts.length-1); }, Y=function(v){ return H-6-(v-lo)/(hi-lo)*(H-12); };
+  var last=pts[pts.length-1], col=last>=0?'var(--res)':'var(--sup)';
+  el.innerHTML='<svg class="cv" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="累計超額 '+last.toFixed(0)+' 點">'+
+    '<line x1="0" x2="'+W+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-dasharray="3 3"/>'+
+    '<polyline fill="none" stroke="'+col+'" stroke-width="1.8" vector-effect="non-scaling-stroke" points="'+pts.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ')+'"/></svg>'+
+    '<div class="cap"><span>'+CV[hz].start.slice(0,4)+'</span><span>累計超額 '+(last>0?'+':'')+last.toFixed(0)+' 點（不是資金曲線）</span><span>'+CV[hz].end.slice(0,4)+'</span></div>';
+}
+function rank(){
+  var rows=[];
+  Object.keys(D.combos).forEach(function(k){ var x=D.combos[k][S.h]&&D.combos[k][S.h][S.dir]; if(x&&nn(x.t)) rows.push([k,x]); });
+  rows.sort(function(a,b){ return b[1].t-a[1].t; });
+  $('rkSub').textContent=(S.dir==='L'?'做多':'做空')+'、抱 '+S.h+' 天';
+  $('rank').innerHTML='<table class="mono"><thead><tr><th>條件</th><th class="hm">筆數</th><th class="hm">勝率</th><th>超額</th><th>t</th><th>淨</th><th>判斷</th></tr></thead><tbody>'+
+    rows.slice(0,20).map(function(r){ var x=r[1], v=verdict(x), ks=r[0].split('|');
+      return '<tr class="go" data-k="'+esc(r[0])+'"><td style="font-family:inherit">'+esc(ks.map(lab).join(' ＋ '))+'</td><td class="hm">'+x.n.toLocaleString('en-US')+'</td><td class="hm">'+x.win.toFixed(0)+'%</td>'+
+        '<td class="'+cl(x.ex)+'">'+pc(x.ex)+'</td><td>'+x.t.toFixed(1)+'</td><td class="'+cl(x.net)+'">'+pc(x.net)+'</td><td><span class="tag '+v.tag[0]+'">'+v.tag[1]+'</span></td></tr>'; }).join('')+'</tbody></table>';
+  Array.prototype.forEach.call(document.querySelectorAll('#rank tr.go'),function(tr){ tr.onclick=function(){
+    var ks=tr.getAttribute('data-k').split('|'); S.c1=ks[0]; S.c2=ks[1]||''; $('c1').value=S.c1; $('c2').value=S.c2; save(); render(); window.scrollTo({top:0,behavior:'smooth'}); }; });
+}
+function codeOut(){
+  var cs=[S.c1,S.c2,$('c3').value].filter(function(v,i,a){ return v&&a.indexOf(v)===i; });
+  $('codeOut').value='BT|'+S.dir+'|'+S.h+'|'+cs.join(',');
+}
+function bindSeg(id,attr){
+  Array.prototype.forEach.call($(id).querySelectorAll('button'),function(b){
+    b.classList.toggle('on',b.getAttribute('data-v')===S[attr]);
+    b.onclick=function(){ S[attr]=b.getAttribute('data-v'); Array.prototype.forEach.call($(id).querySelectorAll('button'),function(x){ x.classList.toggle('on',x===b); }); save(); render(); rank(); };
+  });
+}
+fetch('data/bt_explore.json?t='+Date.now(),{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }).then(function(j){
+  D=j; var m=D.meta;
+  $('meta').textContent=m.start.slice(0,4)+'-'+m.start.slice(4,6)+' ～ '+m.end.slice(0,4)+'-'+m.end.slice(4,6)+'，'+m.days.toLocaleString('en-US')+' 天';
+  $('warn').textContent='共 '+m.n_combos+' 組、試過 '+m.tested.toLocaleString('en-US')+' 格（組合 × 持有天數 × 方向），純靠運氣約有 '+m.lucky+' 格看起來顯著（t ≥ 2）。';
+  opts($('c1'),S.c1,false); opts($('c2'),S.c2,true); opts($('c3'),'',true);
+  if(!S.c1) S.c1=$('c1').value;
+  $('c1').onchange=function(){ S.c1=this.value; save(); render(); };
+  $('c2').onchange=function(){ S.c2=this.value; save(); render(); };
+  $('c3').onchange=codeOut;
+  $('copy').onclick=function(){ var t=$('codeOut'); t.select(); try{ navigator.clipboard.writeText(t.value); this.textContent='已複製'; }catch(e){ document.execCommand&&document.execCommand('copy'); } };
+  bindSeg('dir','dir'); bindSeg('hold','h');
+  render(); rank();
+}).catch(function(){ $('res').innerHTML='<p class="note">還沒有回測工具的資料（要先在 GitHub Actions 跑一次）。</p>'; });
+})();
+</script>
+</body>
+</html>
