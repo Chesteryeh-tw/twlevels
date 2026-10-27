@@ -529,6 +529,9 @@ function buildChart(){
   var pi=0;
   var INT={priceFormat:{type:'custom',minMove:1,formatter:function(v){ return Math.round(v).toLocaleString('en-US'); }}};
   var I=function(o){ return Object.assign({},INT,o); };
+  // 副圖的柱子用 K 棒的畫法（只畫實體），寬度才會跟主圖 K 棒一樣（2026-10-27）
+  var BAR=function(){ return Object.assign({},INT,{priceLineVisible:false,lastValueVisible:false,wickVisible:false,borderVisible:false,
+    upColor:up,downColor:dn}); };
   ser.k=chart.addSeries(LC.CandlestickSeries,{upColor:up,downColor:dn,borderUpColor:up,borderDownColor:dn,wickUpColor:up,wickDownColor:dn,priceLineVisible:true,lastValueVisible:true},0);
   ser.ma=chart.addSeries(LC.LineSeries,{color:css('--c2'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
   ser.bu=chart.addSeries(LC.LineSeries,{color:css('--muted'),lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
@@ -536,15 +539,15 @@ function buildChart(){
   paneIdx.k=0;
   function addPane(key){ pi++; paneIdx[key]=pi; return pi; }
   if(S.panes.vol){ var p=addPane('vol');
-    ser.vol=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p);
+    ser.vol=chart.addSeries(LC.CandlestickSeries,BAR(),p);
     ser.vma5=chart.addSeries(LC.LineSeries,I({color:css('--c2'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}),p);
     ser.vma20=chart.addSeries(LC.LineSeries,I({color:css('--c3'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false}),p); }
   if(S.panes.main){ var p2=addPane('main');
-    ser.main=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p2);
+    ser.main=chart.addSeries(LC.CandlestickSeries,BAR(),p2);
     ser.mainCum=chart.addSeries(LC.LineSeries,I({color:css('--c1'),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false}),p2);
     chart.panes()[p2].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
   INSTK.forEach(function(k){ if(!S.panes[k]) return; var pp=addPane(k);
-    ser['h_'+k]=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),pp);
+    ser['h_'+k]=chart.addSeries(LC.CandlestickSeries,BAR(),pp);
     ser['c_'+k]=chart.addSeries(LC.LineSeries,I({color:css(INST[k][1]),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false}),pp); });
   if(S.panes.mgn){ var p4=addPane('mgn');
     ser.mgn=chart.addSeries(LC.LineSeries,I({color:css('--res'),lineWidth:1.5,priceLineVisible:false,lastValueVisible:false}),p4);
@@ -558,7 +561,7 @@ function buildChart(){
     chart.panes()[p5].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
   if(S.panes.track){ var p6=addPane('track');
     ser.trk=[]; var colors=['--c1','--c3','--c4','--c5','--c2'];
-    ser.trkH=chart.addSeries(LC.HistogramSeries,I({priceLineVisible:false,lastValueVisible:false}),p6);
+    ser.trkH=chart.addSeries(LC.CandlestickSeries,BAR(),p6);
     S.track.forEach(function(name,i){
       ser.trk.push(chart.addSeries(LC.LineSeries,I({color:css(colors[i%colors.length]),lineWidth:1.5,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false,pointMarkersVisible:true}),p6));
     });
@@ -586,20 +589,20 @@ function fillData(){
   var line=function(arr){ return px.map(function(p,i){ return arr[i]==null?{time:p.t}:{time:p.t,value:arr[i]}; }); };
   ser.ma.setData(line(b.m)); ser.bu.setData(line(b.up)); ser.bl.setData(line(b.lo));
   S.boll=b; S.ind=indicators(px,b);
-  if(ser.vol){ ser.vol.setData(px.map(function(p,i){ var prev=i?px[i-1].c:p.o;
-    return p.v==null?{time:p.t}:{time:p.t,value:p.v,color:(p.c>=prev?upA:dnA)}; }));
+  if(ser.vol){ ser.vol.setData(bars(px.map(function(p,i){ var prev=i?px[i-1].c:p.o;
+    return p.v==null?{time:p.t}:{time:p.t,value:p.v,color:(p.c>=prev?upA:dnA)}; })));
     var vv=px.map(function(p){return p.v||0;}), m5=ma(vv,5), m20=ma(vv,20);
     ser.vma5.setData(line(m5)); ser.vma20.setData(line(m20)); S.vma={m5:m5,m20:m20}; }
   if(ser.main){
     var cum=0, any=false;
-    ser.main.setData(px.map(function(p){ var f=dayFlow(S.code,p.d); if(!f) return {time:p.t};
-      return {time:p.t,value:f.net15,color:f.net15>=0?up:dn}; }));
+    ser.main.setData(bars(px.map(function(p){ var f=dayFlow(S.code,p.d); if(!f) return {time:p.t};
+      return {time:p.t,value:f.net15,color:f.net15>=0?up:dn}; })));
     ser.mainCum.setData(px.map(function(p){ var f=dayFlow(S.code,p.d); if(!f) return any?{time:p.t}:{time:p.t};
       any=true; cum+=f.net15; return {time:p.t,value:cum}; }));
   }
   var ch=function(p){ return S.chip[p.d]; };
   INSTK.forEach(function(k){ if(!ser['h_'+k]) return; var cum=0;
-    ser['h_'+k].setData(px.map(function(p){ var v=instVal(ch(p),k); return v==null?{time:p.t}:{time:p.t,value:v,color:v>=0?up:dn}; }));
+    ser['h_'+k].setData(bars(px.map(function(p){ var v=instVal(ch(p),k); return v==null?{time:p.t}:{time:p.t,value:v,color:v>=0?up:dn}; })));
     ser['c_'+k].setData(px.map(function(p){ var v=instVal(ch(p),k); if(v==null) return {time:p.t}; cum+=v; return {time:p.t,value:cum}; })); });
   if(ser.mgn){
     ser.mgn.setData(px.map(function(p){ var r=ch(p); return r&&r.mgn!=null?{time:p.t,value:r.mgn}:{time:p.t}; }));
@@ -615,7 +618,7 @@ function fillData(){
   }
   if(ser.trkH){
     var act=S.track[0];
-    ser.trkH.setData(px.map(function(p){ var n=brokerNet(S.code,p.d,act); return n==null?{time:p.t}:{time:p.t,value:n,color:n>=0?up:dn}; }));
+    ser.trkH.setData(bars(px.map(function(p){ var n=brokerNet(S.code,p.d,act); return n==null?{time:p.t}:{time:p.t,value:n,color:n>=0?up:dn}; })));
     S.track.forEach(function(name,i){ var cum=0, seen=false;
       ser.trk[i].setData(px.map(function(p){ var n=brokerNet(S.code,p.d,name);
         if(n==null) return {time:p.t};   // 未上榜：留空，不當 0
@@ -624,6 +627,9 @@ function fillData(){
   drawEvents();
   placeLegends(); updateLegend(null);
 }
+// {time,value,color} → 從 0 畫到 value 的 K 棒實體
+function bars(arr){ return arr.map(function(x){ if(x.value==null) return {time:x.time};
+  var v=x.value; return {time:x.time,open:0,close:v,high:Math.max(0,v),low:Math.min(0,v),color:x.color,borderColor:x.color,wickColor:x.color}; }); }
 function brokerNet(code,d,name){
   if(!name) return null; var rows=bkDay(code,d); if(!rows) return null;
   var tot=null; rows.forEach(function(r){ if(r.broker===name){ var n=num(r.net_lots); if(n!=null) tot=(tot||0)+n; } });
