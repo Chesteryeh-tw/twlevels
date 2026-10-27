@@ -229,6 +229,12 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
     </section>
 
     <section class="card sec">
+      <h2>SMC／分價量表 <span class="badge" id="smcBadge" title="定義寫死在 smc.py；長樣本回測結果見各列">未驗證</span>
+        <label class="mu" style="font-size:12px;font-weight:400;margin-left:auto;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="smcShow"> 畫在 K 線上</label></h2>
+      <div id="smcOut"></div>
+    </section>
+
+    <section class="card sec">
       <h2>三大法人 <span class="sub">官方，張</span></h2>
       <div id="inst"></div>
     </section>
@@ -281,7 +287,7 @@ var S = {
   bk:{}, cls:{}, status:{}, mpRows:0,  // 分點：bk[code][date] = rows
   sel:null, days:1, side:'buy', months:6,
   track:[],                          // 追蹤中的分點名稱
-  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:false, pat:true},
+  panes:{vol:true, main:true, fgn:true, inv:true, dlr:false, dS:false, dH:false, isum:false, mgn:false, qfii:false, tdcc:false, track:true, ev:false, pat:true, smc:true},
   range:null, picking:false,         // 區間累計：{from,to}（YYYYMMDD）
   cfg:{evN:3, evK:5, occN:10, bhW:20} // 籌碼事件連續天數、爆量倍數、分點占量天數、行為觀察天數（使用者可改）
 };
@@ -295,7 +301,7 @@ function saveUI(){ try{ localStorage.setItem('twlvChipsUI', JSON.stringify({pane
 
 var PANES = [
   ['vol','成交量＋均量線'],['main','主力買賣超'],['fgn','外資'],['inv','投信'],['dlr','自營商'],['dS','自營（自行買賣）'],['dH','自營（避險）'],['isum','三大法人合計'],
-  ['mgn','融資融券'],['qfii','外資持股比率（上市）'],['tdcc','集保大戶／散戶（每週）'],['track','分點追蹤'],['ev','籌碼事件標記（K 線上）'],['pat','K 線型態（K 線上）']
+  ['mgn','融資融券'],['qfii','外資持股比率（上市）'],['tdcc','集保大戶／散戶（每週）'],['track','分點追蹤'],['ev','籌碼事件標記（K 線上）'],['pat','K 線型態（K 線上）'],['smc','SMC／分價量表（K 線上）']
 ];
 var INST={fgn:['外資','--c1'],inv:['投信','--c3'],dlr:['自營商','--c2'],dS:['自營（自行）','--c4'],dH:['自營（避險）','--c5'],isum:['三大法人合計','--c5']};
 var INSTK=['fgn','inv','dlr','dS','dH','isum'];
@@ -381,7 +387,8 @@ function loadStock(code){
     return {chip:chip,tdcc:tdcc,qfii:qfii};
   }).catch(function(){ return {chip:{},tdcc:[],qfii:[]}; });
   var c=getText('data/patterns/'+encodeURIComponent(code)+'.json').then(function(t){ return JSON.parse(t)||[]; }).catch(function(){ return []; });
-  return Promise.all([a,b,c]);
+  var e=getText('data/smc/'+encodeURIComponent(code)+'.json').then(function(t){ return JSON.parse(t)||null; }).catch(function(){ return null; });
+  return Promise.all([a,b,c,e]);
 }
 
 /* ---------- 指標 ---------- */
@@ -632,7 +639,7 @@ function fillData(){
         if(n==null) return {time:p.t};   // 未上榜：留空，不當 0
         seen=true; cum+=n; return {time:p.t,value:cum}; })); });
   }
-  drawEvents(); drawPatterns();
+  drawEvents(); drawPatterns(); drawSmc();
   placeLegends(); updateLegend(null);
 }
 // {time,value,color} → 從 0 畫到 value 的 K 棒實體
@@ -865,6 +872,7 @@ function drawEvents(){
     var mk=S.panes.ev? evs.map(function(e){ return {time:e.t, position:e.up===0?'aboveBar':'belowBar',
       color:e.up===1?css('--res'):(e.up===0?css('--sup'):css('--muted')), shape:e.up===1?'arrowUp':(e.up===0?'arrowDown':'circle'), text:ab[e.k]}; }) : [];
     if(S.panes.pat) mk=mk.concat(patMarkers());
+    if(S.panes.smc) mk=mk.concat(smcMarkers());
     mk.sort(function(a,b){ return a.time<b.time?-1:(a.time>b.time?1:0); });
     try{ if(markerApi&&markerApi._s===ser.k) markerApi.setMarkers(mk); else { markerApi=LC.createSeriesMarkers(ser.k,mk); markerApi._s=ser.k; } }catch(e){}
   }
@@ -915,6 +923,67 @@ function renderPatterns(){
     '<li class="mu" style="border:0">只用當天以前的資料；訊號日＝收盤第一次突破（跌破）頸線。紅↑多方型態、綠↓空方型態；實線連轉折點、虛線是頸線。目標、停損只是型態量法，不是建議</li>' :
     '<li class="mu" style="border:0">這段期間沒有辨識到型態</li>';
 }
+/* ---------- SMC／ICT 與分價量表（smc.py 產生 data/smc/<代號>.json；未驗證） ---------- */
+var SMC_AB={choch_u:'CHoCH',choch_d:'CHoCH',bos_u:'BOS',bos_d:'BOS',ob_u:'OB',ob_d:'OB',fvg_u:'FVG',fvg_d:'FVG',sweep_u:'掃',sweep_d:'掃',poc_u:'POC',poc_d:'POC'};
+var SMC_NM={choch_u:'CHoCH↑ 結構轉多',choch_d:'CHoCH↓ 結構轉空',bos_u:'BOS↑ 續漲破高',bos_d:'BOS↓ 續跌破低',ob_u:'多方 OB 回測守住',ob_d:'空方 OB 回測守住',
+  fvg_u:'多方 FVG 回補守住',fvg_d:'空方 FVG 回補守住',sweep_u:'掃低點流動性後收回',sweep_d:'掃高點流動性後收回',poc_u:'回測 POC 守住',poc_d:'反彈 POC 不過'};
+var SMC_MK={choch_u:1,choch_d:1,bos_u:1,bos_d:1,sweep_u:1,sweep_d:1};   // 圖上只標結構與掃蕩，其他列在側欄
+var BTS=null;
+getText('data/bt_smc.json').then(function(t){ BTS=JSON.parse(t); renderSmc(); }).catch(function(){});
+function smcEvInView(){ var px=S.px; if(!px.length||!S.smc) return [];
+  var a=px[0].d, b=px[px.length-1].d; return S.smc.ev.filter(function(e){ return e.d>=a&&e.d<=b; }); }
+function smcMarkers(){ return smcEvInView().filter(function(e){ return SMC_MK[e.k]; }).map(function(e){ var up=/_u$/.test(e.k);
+  return {time:iso(e.d), position:up?'belowBar':'aboveBar', color:up?css('--res'):css('--sup'), shape:up?'arrowUp':'arrowDown', text:SMC_AB[e.k]}; }); }
+function drawSmc(){
+  if(!chart||!ser.k) return;
+  (ser.smc||[]).forEach(function(x){ try{ chart.removeSeries(x); }catch(e){} });
+  (ser.smcPL||[]).forEach(function(x){ try{ ser.k.removePriceLine(x); }catch(e){} });
+  ser.smc=[]; ser.smcPL=[];
+  var z=S.smc, px=S.px;
+  if(S.panes.smc&&z&&px.length){
+    var last=px[px.length-1].t, first=px[0].d;
+    var seg=function(a,b,p,col,style,w){ if(a<first) return; var s1=chart.addSeries(LC.LineSeries,{color:col,lineWidth:w||1,lineStyle:style||0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},0);
+      s1.setData(a===b?[{time:iso(a),value:p}]:[{time:iso(a),value:p},{time:iso(b),value:p}]); ser.smc.push(s1); };
+    // 結構線：被突破的轉折點 → 突破那天
+    (z.lines||[]).forEach(function(l){ seg(l.a,l.b,l.p,/_u$/.test(l.k)?css('--res'):css('--sup'),0,1); });
+    // 還沒被回測的 OB／FVG：上下緣畫到最後一天
+    (z.zones||[]).forEach(function(q){ var col=q.s>0?css('--res'):css('--sup'), st=q.k==='ob'?0:2;
+      seg(q.d,px[px.length-1].d,q.top,col,st,1); seg(q.d,px[px.length-1].d,q.bot,col,st,1); });
+    // 等高／等低
+    (z.eq||[]).forEach(function(q){ seg(q.a,q.b,q.p,css('--muted'),1,1); });
+    // 分價量表、區間中線
+    var pl=function(p,title,col,st){ ser.smcPL.push(ser.k.createPriceLine({price:p,color:col,lineWidth:1,lineStyle:st,axisLabelVisible:true,title:title})); };
+    if(z.vp){ pl(z.vp.poc,'POC',css('--c3'),0); pl(z.vp.vah,'VAH',css('--c3'),2); pl(z.vp.val,'VAL',css('--c3'),2); }
+    if(z.rng){ pl((z.rng.hi+z.rng.lo)/2,'EQ',css('--muted'),1); }
+  }
+  renderSmc();
+}
+function smcStat(k){ if(!BTS||!BTS.types||!BTS.types[k]) return '';
+  var r=BTS.types[k], m=r.base&&r.base[String(BTS.meta.main_h)]&&r.base[String(BTS.meta.main_h)].pre; if(!m) return '';
+  return ' <span class="badge'+(r.pass?'':' warn')+'" title="長樣本 2021-02～2025-08、抱 '+BTS.meta.main_h+' 天、照方向比大盤：'+
+    (m.ex>=0?'+':'')+m.ex.toFixed(2)+'%（t '+(m.t==null?'—':m.t)+'），淨 '+(m.net>=0?'+':'')+m.net.toFixed(2)+'%">'+(r.pass?'回測通過':'測不出來')+'</span>'; }
+function renderSmc(){
+  if(!$('smcOut')) return;
+  var z=S.smc, px=S.px;
+  if(!z||!px||!px.length){ $('smcOut').innerHTML='<div class="empty">這檔沒有 SMC 資料</div>'; return; }
+  if(BTS) $('smcBadge').textContent='回測見各列';
+  var c=px[px.length-1].c, h=[];
+  h.push('<ul class="evl">');
+  h.push('<li><span>結構</span><span class="'+(z.trend>0?'r':(z.trend<0?'g':'mu'))+'">'+(z.trend>0?'偏多（最近破高）':(z.trend<0?'偏空（最近破低）':'未定'))+'</span></li>');
+  if(z.rng){ var eq=(z.rng.hi+z.rng.lo)/2; h.push('<li><span>區間 '+z.rng.lo+'～'+z.rng.hi+'</span><span class="mu">'+(c>eq?'Premium（上半，偏貴）':'Discount（下半，偏便宜）')+'</span></li>'); }
+  if(z.vp) h.push('<li><span>分價量表 60 天</span><span class="mono">POC '+z.vp.poc+'｜價值區 '+z.vp.val+'～'+z.vp.vah+'</span></li>');
+  (z.zones||[]).slice(-6).reverse().forEach(function(q){ h.push('<li><span class="'+(q.s>0?'r':'g')+'">'+(q.s>0?'多方':'空方')+' '+(q.k==='ob'?'OB':'FVG')+'（未回測）</span><span class="mono">'+q.bot+'～'+q.top+'</span></li>'); });
+  (z.eq||[]).forEach(function(q){ h.push('<li><span class="mu">'+(q.s>0?'等高':'等低')+'（流動性）</span><span class="mono">'+q.p+'</span></li>'); });
+  h.push('</ul><ul class="evl" style="margin-top:6px">');
+  var v=smcEvInView().slice(-8).reverse();
+  v.forEach(function(e){ h.push('<li><span><span class="'+(/_u$/.test(e.k)?'r':'g')+'">'+esc(SMC_NM[e.k]||e.k)+'</span>'+smcStat(e.k)+
+    '<br><span class="mu" style="font-size:11.5px">'+(e.top===e.bot?'價位 '+e.top:'區間 '+e.bot+'～'+e.top)+'</span></span><span class="mono mu">'+iso(e.d)+'</span></li>'); });
+  h.push('<li class="mu" style="border:0">只用當天以前的資料。BOS＝順勢破前高（低）、CHoCH＝第一次反方向破、OB＝突破前最後一根反向 K 的區間、FVG＝三根 K 中間留下的缺口、掃＝影線刺破前高（低）但收回、POC＝60 天成交最多的價位。圖上實線＝被突破的轉折、虛線＝還沒回測的 FVG、實線區間＝OB、灰線＝等高等低、POC／VAH／VAL 在右軸。</li></ul>');
+  $('smcOut').innerHTML=h.join('');
+}
+$('smcShow').checked=!!S.panes.smc;
+$('smcShow').onchange=function(){ S.panes.smc=this.checked; saveUI(); renderPaneMenu(); drawEvents(); drawSmc(); };
+
 $('patShow').checked=!!S.panes.pat;
 $('patShow').onchange=function(){ S.panes.pat=this.checked; saveUI(); renderPaneMenu(); drawEvents(); drawPatterns(); };
 
@@ -1096,7 +1165,7 @@ function renderPaneMenu(){
     '<div class="hint">副圖之間的分隔線可以拖曳調整高度。</div>';
   Array.prototype.forEach.call(document.querySelectorAll('#panePop input'),function(cb){
     cb.onchange=function(){ var k=cb.getAttribute('data-k'); S.panes[k]=cb.checked; saveUI();
-      if(k==='ev'){ $('evShow').checked=cb.checked; drawEvents(); } else if(k==='pat'){ $('patShow').checked=cb.checked; drawEvents(); drawPatterns(); } else buildChart(); };
+      if(k==='ev'){ $('evShow').checked=cb.checked; drawEvents(); } else if(k==='pat'){ $('patShow').checked=cb.checked; drawEvents(); drawPatterns(); } else if(k==='smc'){ $('smcShow').checked=cb.checked; drawEvents(); drawSmc(); } else buildChart(); };
   });
 }
 $('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
@@ -1172,7 +1241,7 @@ function open(code){
   }
   $('info').textContent='載入 '+code+'…';
   loadStock(code).then(function(r){
-    S.code=code; S.px=r[0]; S.pat=r[2]||[]; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
+    S.code=code; S.px=r[0]; S.pat=r[2]||[]; S.smc=r[3]||null; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
     S.sel = S.px.length ? S.px[S.px.length-1].d : null;
     // 有分點資料時，預設選最後一個有分點的交易日
     var bk=S.bk[code]; if(bk){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
