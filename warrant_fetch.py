@@ -427,6 +427,18 @@ def load_day(man, d, tk, mk):
         code = str(r[iC]).strip()
         vol, amt, close, uo = px.get(code, (None, None, None, None))
         out.append((code, str(r[iN]).strip(), -dn, vol, amt, close, uo))
+    # 2026-10-27：T86 只列自營商有進出的權證；行情表有成交、T86 沒列的（自營商沒買賣），非自營商淨股數＝0，
+    # 也要列進來，母體才完整（GPT 10-27 核對：34 天漏 11,453 筆、每天約 337 筆）。H5 不受影響（淨額 0）。
+    seen = {o[0] for o in out}
+    jN = col(mf, "證券名稱")
+    for r in mdata:
+        code = str(r[jC]).strip()
+        if code in seen or not code:
+            continue
+        vol, amt, close, uo = px[code]
+        if not vol or vol <= 0:
+            continue
+        out.append((code, str(r[jN]).strip() if jN >= 0 else "", 0, vol, amt, close, uo))
     return out
 
 
