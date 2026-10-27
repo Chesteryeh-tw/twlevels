@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "probe＝抓一天看欄位；full＝從 2024-10 抓到昨天＋回測；study＝不連證交所，只用已抓的資料重算"
+        description: "probe＝抓一天看欄位；full＝從 2024-10 抓到昨天＋回測；study＝不連證交所，只用已抓的資料重算；check＝不連證交所，輸出核對指紋"
         type: choice
-        options: [probe, probe2, full, study]
+        options: [probe, probe2, full, study, check]
         default: probe
       probe_date:
         description: "probe 用的日期 YYYYMMDD（空白＝昨天）"
@@ -51,7 +51,7 @@ jobs:
         run: python warrant_fetch.py --probe2 ${{ inputs.probe_date }}
 
       - name: 還原已抓的權證資料
-        if: env.MODE == 'full' || env.MODE == 'study'
+        if: env.MODE == 'full' || env.MODE == 'study' || env.MODE == 'check'
         uses: actions/cache/restore@v4
         with:
           path: data/warrant_raw
@@ -68,6 +68,11 @@ jobs:
       - name: 只重建（不連網）
         if: env.MODE == 'study'
         run: python warrant_fetch.py --derive-only
+
+      # 2026-10-27：跟 GPT 交來的官方原始檔（TWT43U＋MI_INDEX）核對；只輸出筆數、加總、雜湊
+      - name: 核對指紋（不連網、不存快取）
+        if: env.MODE == 'check'
+        run: python warrant_check.py --derived 20260902 20261022
 
       - name: 存進快取
         if: always() && env.MODE == 'full'
