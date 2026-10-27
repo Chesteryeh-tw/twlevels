@@ -101,9 +101,57 @@ def state_of(p):
     return "貼下軌"
 
 
+# 公司行動調整層（2026-10-27，`--adjust`）：不改原始價，只在算報酬時乘上調整因子。
+# 因子＝除權息（減資、面額變更）前收盤 ÷ 參考價，生效日起累乘；等於假設股利再投入。
+# 預設關閉：關閉時 af() 一律回 1.0，所有數字跟以前逐位相同。
+ADJUST = False
+CA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "corporate_actions.csv")
+
+
+def load_ca_factors():
+    """code -> [(生效日, 因子)]。前收盤或參考價缺、或因子不合理（< 0.02 或 > 50）的不用。"""
+    import csv as _csv
+    out = defaultdict(list)
+    if not os.path.exists(CA_PATH):
+        return out
+    with open(CA_PATH, encoding="utf-8") as fh:
+        for r in _csv.DictReader(fh):
+            try:
+                pc, rp = float(r["prev_close"]), float(r["ref_price"])
+            except (TypeError, ValueError):
+                continue
+            if pc <= 0 or rp <= 0:
+                continue
+            f = pc / rp
+            if 0.02 < f < 50 and abs(f - 1) > 1e-9:      # 面額變更、ETF 分割可到 10～24 倍（例：寶雅 5904 2026-08-10）
+                out[r["code"]].append((r["effective_date"], f))
+    return out
+
+
+def adj_series(dates, evs):
+    """累乘因子：cum[k]＝生效日 ≤ dates[k] 的所有因子相乘。"""
+    cum, k, m = [], 0, 1.0
+    evs = sorted(evs)
+    for d in dates:
+        while k < len(evs) and evs[k][0] <= d:
+            m *= evs[k][1]
+            k += 1
+        cum.append(m)
+    return cum
+
+
+def af(st, a, b):
+    """從第 a 天的價格基準換到第 b 天：c[b] × af(st, a, b) 跟 a 天的價格可以直接比。"""
+    cum = st.get("adj")
+    if not cum:
+        return 1.0
+    return cum[b] / cum[a]
+
+
 def load_stocks():
     """code -> dict(dates, o, h, l, c, lot, wan)，皆由舊到新。"""
     out = {}
+    ca = load_ca_factors() if ADJUST else {}
     for fn in sorted(os.listdir(T.STOCK_DIR)):
         if not fn.endswith(".txt"):
             continue
@@ -129,7 +177,8 @@ def load_stocks():
         if len(c) >= WARMUP + max(HORIZONS):
             ma20, bbup, bblo, pos = boll_series(c)
             out[code] = dict(dates=dates, o=o, h=h, l=l, c=c, lot=lot, wan=wan,
-                             pos=pos, ma20=ma20, bbUp=bbup, bbLo=bblo)
+                             pos=pos, ma20=ma20, bbUp=bbup, bbLo=bblo,
+                             adj=adj_series(dates, ca[code]) if ca.get(code) else None)
     return out
 
 
@@ -515,10 +564,10 @@ def exit_scan(st, i, side, ex):
             fc = c[jf] if jf < len(c) else None
             fo = o[jf + 1] if (jf + 1) < len(o) else None
             return dict(n=n, reason=reason,
-                        retC=(pc / entry - 1) * 100,
-                        retO=(nxt / entry - 1) * 100,
-                        fullC=((fc / entry - 1) * 100) if (fc and fc > 0) else None,
-                        fullO=((fo / entry - 1) * 100) if (fo and fo > 0) else None)
+                        retC=(pc * af(st, a, j) / entry - 1) * 100,
+                        retO=(nxt * af(st, a, j + 1) / entry - 1) * 100,
+                        fullC=((fc * af(st, a, jf) / entry - 1) * 100) if (fc and fc > 0) else None,
+                        fullO=((fo * af(st, a, jf + 1) / entry - 1) * 100) if (fo and fo > 0) else None)
     return None
 
 
@@ -844,11 +893,11 @@ def run(limit_days=None, verbose=True, exits=None):
             entry = st["o"][i + 1] if (i + 1) < len(st["o"]) else None
             fwd = {}
             for h in HORIZONS:
-                c1 = st["c"][i + h]
+                c1 = st["c"][i + h] * af(st, i + 1, i + h)
                 fwd[h] = (c1 / entry - 1) * 100 if (entry and entry > 0) else None
             # 跳空：訊號日收盤 → 隔天開盤。這一段吃不到，但要看得到。
             c0 = st["c"][i]
-            fwd[GAP] = (entry / c0 - 1) * 100 if (entry and c0 and c0 > 0) else None
+            fwd[GAP] = (entry * af(st, i, i + 1) / c0 - 1) * 100 if (entry and c0 and c0 > 0) else None
             rows.append((code, mkt, base, d, fwd, i, st))
 
         # 基準：通過流動性門檻（成交金額 ≥ 1 億）的全市場平均
@@ -883,10 +932,10 @@ def run(limit_days=None, verbose=True, exits=None):
                     j_ = i_ + n
                     cj = st_["c"][j_]
                     if cj and cj > 0:
-                        vc.append((cj / e_ - 1) * 100)
+                        vc.append((cj * af(st_, i_ + 1, j_) / e_ - 1) * 100)
                     oj = st_["o"][j_ + 1]
                     if oj and oj > 0:
-                        vo.append((oj / e_ - 1) * 100)
+                        vo.append((oj * af(st_, i_ + 1, j_ + 1) / e_ - 1) * 100)
                 for tag, vals in (("C", vc), ("O", vo)):
                     if not vals:
                         bmN[tag][n] = bmedN[tag][n] = None
@@ -1663,6 +1712,10 @@ if __name__ == "__main__":
         if a.isdigit():
             limit = int(a)
     here = os.path.dirname(os.path.abspath(__file__))
+    # --adjust：公司行動調整版，結果另存 backtest_adj.json／data/bt_series_adj.json，不蓋掉原本的
+    if "--adjust" in args:
+        ADJUST = True
+    sfx = "_adj" if ADJUST else ""
 
     want_exits = "--exits" in args
     res = run(limit_days=limit, exits=EXIT_PRESETS if want_exits else None)
@@ -1671,7 +1724,7 @@ if __name__ == "__main__":
     # 主站「事件」頁的累計圖用；照方向、逐日平均，畫圖時累加（不是資金曲線）
     ev = list(res["eval_days"])
     compact = {k: {h: [m.get(d) for d in ev] for h, m in hs.items()} for k, hs in series.items()}
-    with open(os.path.join(here, "data", "bt_series.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(here, "data", "bt_series%s.json" % sfx), "w", encoding="utf-8") as fh:
         json.dump({"days": len(ev), "from": ev[0], "to": ev[-1], "dates": ev,
                    "note": "照方向的每日平均超額（%），null＝那天沒選到；逐日累加畫圖，不是資金曲線",
                    "series": compact}, fh, ensure_ascii=False, separators=(",", ":"))
@@ -1705,5 +1758,6 @@ if __name__ == "__main__":
         out["rally_rows"] = rl_rows
         out["rally_meta"] = rl_meta
 
-    with open(os.path.join(here, "backtest.json"), "w", encoding="utf-8") as fh:
+    out["adjusted"] = ADJUST
+    with open(os.path.join(here, "backtest%s.json" % sfx), "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)

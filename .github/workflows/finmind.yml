@@ -12,6 +12,10 @@ on:
       start_date:
         description: "要補到哪一年（full 才有用）"
         default: "2021-01-01"
+      adjust:
+        description: "另外跑一次公司行動調整版（除權息、減資、面額變更），存成 backtest_adj.json，不蓋原本的"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -115,6 +119,11 @@ jobs:
         if: inputs.mode == 'full'
         run: python bttags.py
 
+      # 2026-10-27：公司行動調整層（backtest.py --adjust）。只在勾選時跑，結果另存，主站仍用原本的
+      - name: 公司行動調整版回測（另存）
+        if: inputs.mode == 'full' && inputs.adjust
+        run: python backtest.py --exits --adjust
+
       # 只 commit 報告，不 commit 原始歷史 —— 那 110 MB 留在快取裡就好，
       # 進了 repo 之後每次 checkout 都要多下載一次，而且永遠刪不掉。
       - name: 推回報告
@@ -125,7 +134,7 @@ jobs:
           # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
           run_git(){ out=$("$@" 2>&1); rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
           ls -la data/bt_series.json backtest.json data/bt_tags.json || true
-          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json
+          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json 2>/dev/null)
           if git diff --cached --quiet; then
             echo "沒有變動"
           else
