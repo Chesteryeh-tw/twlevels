@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "probe＝抓一天看欄位；full＝從 2024-10 抓到昨天＋回測；study＝不連證交所，只用已抓的資料重算；check＝不連證交所，輸出核對指紋"
+        description: "probe＝抓一天看欄位；full＝從 2024-10 抓到昨天＋回測；study＝不連證交所，只用已抓的資料重算；check＝不連證交所，輸出核對指紋；list＝不連證交所，輸出權證每日母體清單（下載區）"
         type: choice
-        options: [probe, probe2, full, study, check]
+        options: [probe, probe2, full, study, check, list]
         default: probe
       probe_date:
         description: "probe 用的日期 YYYYMMDD（空白＝昨天）"
@@ -51,7 +51,7 @@ jobs:
         run: python warrant_fetch.py --probe2 ${{ inputs.probe_date }}
 
       - name: 還原已抓的權證資料
-        if: env.MODE == 'full' || env.MODE == 'study' || env.MODE == 'check'
+        if: env.MODE == 'full' || env.MODE == 'study' || env.MODE == 'check' || env.MODE == 'list'
         uses: actions/cache/restore@v4
         with:
           path: data/warrant_raw
@@ -73,6 +73,22 @@ jobs:
       - name: 核對指紋（不連網、不存快取）
         if: env.MODE == 'check'
         run: python warrant_check.py --derived 20260902 20261022
+
+      # 2026-10-27：給 GPT 排權證分點抓取用的每日母體（含已到期權證）；私人，只放下載區
+      - name: 權證每日母體清單（不連網）
+        if: env.MODE == 'list'
+        run: python warrant_universe.py 20241001 20991231
+
+      - name: 母體清單下載區
+        if: env.MODE == 'list'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warrant-universe
+          path: |
+            warrant_universe_daily.csv.gz
+            warrant_universe_summary.csv
+            warrant_universe_readme.md
+          retention-days: 30
 
       - name: 存進快取
         if: always() && env.MODE == 'full'
