@@ -78,7 +78,23 @@ a{color:var(--accent)}
 .pop .hint{font-size:12px;color:var(--muted);margin-top:6px}
 
 /* 主體 */
-.wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;padding:12px 16px 24px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) clamp(380px,30vw,520px);gap:12px;padding:12px 16px 24px;align-items:start}
+/* 10-28：桌機版左邊圖固定、右邊側欄自己捲（使用者：捲到分點明細時看不到線圖） */
+@media (min-width:861px){
+  .wrap>section.card{position:sticky;top:calc(var(--hdr,58px) + 12px)}
+  .side{position:sticky;top:calc(var(--hdr,58px) + 12px);max-height:calc(100vh - var(--hdr,58px) - 24px);overflow-y:auto;overscroll-behavior:contain;padding-right:2px;scrollbar-width:thin}
+}
+/* 側欄每區可收合 */
+.sec h2.fold{cursor:pointer;user-select:none}
+.sec h2.fold::before{content:'▾';font-size:12px;color:var(--muted);width:12px;display:inline-block;transition:transform .15s}
+.sec.closed h2.fold::before{transform:rotate(-90deg)}
+.sec.closed>*:not(h2){display:none!important}
+.sec.closed h2{margin-bottom:0}
+.occ{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;font-size:12px}
+.occ .seg button{padding:3px 8px;font-size:12px}
+.occ input[type=date]{padding:3px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);min-width:0;flex:1 1 110px;font-size:12px}
+.flash{animation:flash 1.2s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:var(--shadow)}}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .info{padding:8px 12px;border-bottom:1px solid var(--line2);display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;min-height:38px}
 .info b{font-weight:600}
@@ -117,7 +133,7 @@ a{color:var(--accent)}
 .badge{display:inline-block;font-size:11px;padding:0 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-weight:400;white-space:nowrap}
 .badge.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
 .note{font-size:12px;color:var(--muted);margin-top:6px}
-table.bk{width:100%;border-collapse:collapse;font-size:12.5px}
+table.bk{width:100%;border-collapse:collapse;font-size:12px}
 table.bk th{font-weight:500;color:var(--muted);text-align:right;padding:4px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
 table.bk th:first-child,table.bk td:first-child{text-align:left}
 table.bk td{padding:4px 4px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
@@ -125,7 +141,7 @@ table.bk tr.row{cursor:pointer}
 table.bk tr.row:hover td{background:var(--surface2)}
 table.bk tr.on td{background:var(--accent-soft)}
 .tw{overflow-x:auto;margin:0 -4px}
-.bname{max-width:118px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
+.bname{max-width:150px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
 .star{color:var(--accent);width:14px;display:inline-block}
 .tabs{display:flex;gap:6px;margin-bottom:8px}
 .tabs button{flex:1}
@@ -244,8 +260,12 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
       <div class="tabs seg" id="side" role="group" aria-label="買方或賣方" style="display:flex">
         <button data-s="buy" class="on">買方 15</button><button data-s="sell">賣方 15</button>
       </div>
+      <div class="occ"><span class="mu">占量期間</span>
+        <div class="seg" id="occSeg" role="group" aria-label="占量期間"><button data-n="1">當天</button><button data-n="5">5日</button><button data-n="10">10日</button><button data-n="20">20日</button><button data-n="r">自訂</button></div>
+        <span id="occRange" style="display:none;gap:6px;flex:1 1 100%"><input type="date" id="occFrom" aria-label="占量起日"><input type="date" id="occTo" aria-label="占量迄日"></span>
+      </div>
       <div id="bk"></div>
-      <div class="note">點分點 → 加入下方「分點追蹤」副圖。均價對收盤：正＝收盤高於分點均價。</div>
+      <div class="note">點分點 → 加入左邊 K 線下方的「分點追蹤」副圖（再點一次移除，最多 5 個）。均價對收盤：正＝收盤高於分點均價。</div>
     </section>
 
     <section class="card sec">
@@ -605,7 +625,8 @@ function buildChart(){
     ser.big=chart.addSeries(LC.LineSeries,{color:css('--res'),lineWidth:2,pointMarkersVisible:true,priceLineVisible:false,lastValueVisible:false},p5);
     ser.small=chart.addSeries(LC.LineSeries,{color:css('--sup'),lineWidth:2,pointMarkersVisible:true,priceScaleId:'left',priceLineVisible:false,lastValueVisible:false},p5);
     chart.panes()[p5].priceScale('left').applyOptions({visible:true,borderColor:css('--line')}); }
-  if(S.panes.track){ var p6=addPane('track');
+  S.trackPane=null;
+  if(S.panes.track){ var p6=addPane('track'); S.trackPane=p6;
     ser.trk=[]; var colors=['--c1','--c3','--c4','--c5','--c2'];
     ser.trkH=chart.addSeries(LC.CandlestickSeries,BAR(),p6);
     S.track.forEach(function(name,i){
@@ -1144,6 +1165,17 @@ function tagOf(name){
   var t={'外資':'外','官股':'官','本土':'本'}[c.class]||'';
   return t?'<span class="badge">'+t+'</span>':'—';
 }
+// 占量期間：當天／N 日（到選的那天為止）或自訂起訖（使用者 10-28）
+function occRange(iD){
+  var v=S.cfg.occN;
+  if(v==='r'){
+    var f=(S.cfg.occFrom||'').replace(/-/g,''), t=(S.cfg.occTo||'').replace(/-/g,'');
+    var a=-1,b=-1; for(var i=0;i<S.px.length;i++){ if(a<0&&f&&S.px[i].d>=f) a=i; if(t&&S.px[i].d<=t) b=i; }
+    if(a>=0&&b>=a) return {n:b-a+1,end:b,lab:iso(S.px[a].d).slice(5)+'～'+iso(S.px[b].d).slice(5)+' '};
+    v=10;
+  }
+  v=+v||10; return {n:v,end:iD,lab:v===1?'當天':v+'日'};
+}
 function renderBrokers(){
   var d=S.sel, rows=bkDay(S.code,d);
   var st=(S.status[S.code]||{})[d];
@@ -1156,14 +1188,14 @@ function renderBrokers(){
   var close=(S.px[idxOf(d)]||{}).c;
   var list=rows.filter(function(r){return r.side===S.side;}).sort(function(a,b){return (+a.rank)-(+b.rank);});
   var anyCls=Object.keys(S.cls).some(function(k){ return S.cls[k].classification_status==='confirmed'; });
-  var iD=idxOf(d), N=S.cfg.occN, sgn=S.side==='buy'?1:-1;
+  var iD=idxOf(d), sgn=S.side==='buy'?1:-1, OR=occRange(iD), N=OR.n, oEnd=OR.end, oLab=OR.lab;
   var h=['<div class="tw"><table class="bk mono"><thead><tr><th>分點</th>'+(anyCls?'<th>類</th>':'')+'<th>'+(S.side==='buy'?'買超':'賣超')+'</th>'+
-    '<th title="同方向、每天都上榜的連續天數；≥ 表示再往前沒有分點資料">連續</th><th title="近 '+N+' 日這個分點淨買賣 ÷ 近 '+N+' 日成交量（只加總上榜日）">'+N+'日占量</th>'+
+    '<th title="同方向、每天都上榜的連續天數；≥ 表示再往前沒有分點資料">連續</th><th title="'+esc(oLab)+'這個分點淨買賣 ÷ 同期成交量（只加總上榜日）">'+esc(oLab)+'占量</th>'+
     '<th>均價</th><th title="（收盤 − 分點均價）÷ 分點均價">對收盤</th><th>買張</th><th>賣張</th><th title="買張＋賣張">交易量</th></tr></thead><tbody>'];
   list.forEach(function(r){
     var on=S.track.indexOf(r.broker)>=0, ap=num(r.avg_price), n=num(r.net_lots);
     var gap = ap&&close ? (close-ap)/ap*100 : null;
-    var st=bkStreak(S.code,iD,r.broker,sgn), oc=bkOcc(S.code,iD,r.broker,N), bh=behaviorOf(S.code,iD,r.broker,r);
+    var st=bkStreak(S.code,iD,r.broker,sgn), oc=bkOcc(S.code,oEnd,r.broker,N), bh=behaviorOf(S.code,iD,r.broker,r);
     var bl=num(r.buy_lots), sl=num(r.sell_lots);
     h.push('<tr class="row'+(on?' on':'')+'" data-b="'+esc(r.broker)+'"><td><span class="star">'+(on?'★':'')+'</span><span class="bname" title="'+esc(r.broker)+'">'+esc(r.broker)+'</span>'+
       (bh.length?bh.map(function(x){ return '<span class="bh">'+x+'</span>'; }).join(''):'')+'</td>'+
@@ -1188,6 +1220,10 @@ function toggleTrack(name){
   if(i>=0) S.track.splice(i,1); else { if(S.track.length>=5) S.track.shift(); S.track.push(name); }
   if(!S.panes.track){ S.panes.track=true; saveUI(); renderPaneMenu(); }
   renderTrack(); buildChart(); renderBrokers();
+  var card=document.querySelector('.wrap>section.card'); if(card){ card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    // 捲到左邊的「分點追蹤」副圖（在圖的最下面）
+    setTimeout(function(){ try{ var pe=S.trackPane!=null&&chart.panes()[S.trackPane].getHTMLElement();
+      if(pe){ var r=pe.getBoundingClientRect(); if(r.bottom>window.innerHeight||r.top<0) window.scrollBy({top:r.bottom-window.innerHeight+16,behavior:'smooth'}); } }catch(e){} },150); }
 }
 function renderTrack(){
   var colors=['--c1','--c3','--c4','--c5','--c2'];
@@ -1209,6 +1245,37 @@ function renderPaneMenu(){
 }
 $('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
 document.addEventListener('click',function(e){ if(!$('paneMenu').contains(e.target)) $('paneMenu').classList.remove('open'); });
+
+/* ---------- 占量期間、側欄收合、版面（10-28） ---------- */
+(function(){
+  function syncOcc(){
+    Array.prototype.forEach.call($('occSeg').querySelectorAll('button'),function(b){ b.classList.toggle('on',String(b.getAttribute('data-n'))===String(S.cfg.occN)); });
+    $('occRange').style.display=S.cfg.occN==='r'?'flex':'none';
+    if(S.cfg.occFrom) $('occFrom').value=S.cfg.occFrom; if(S.cfg.occTo) $('occTo').value=S.cfg.occTo;
+  }
+  Array.prototype.forEach.call($('occSeg').querySelectorAll('button'),function(b){ b.onclick=function(){
+    var v=b.getAttribute('data-n'); S.cfg.occN = v==='r' ? 'r' : +v;
+    if(v==='r'&&!S.cfg.occTo&&S.sel){ S.cfg.occTo=iso(S.sel); var i=idxOf(S.sel); if(i>=9) S.cfg.occFrom=iso(S.px[i-9].d); }
+    saveUI(); syncOcc(); renderBrokers(); }; });
+  $('occFrom').onchange=function(){ S.cfg.occFrom=this.value; saveUI(); renderBrokers(); };
+  $('occTo').onchange=function(){ S.cfg.occTo=this.value; saveUI(); renderBrokers(); };
+  syncOcc();
+  // 收合：點標題（不含裡面的勾選框、輸入框）
+  var closed={}; try{ closed=JSON.parse(localStorage.getItem('twlvSecClosed')||'{}'); }catch(e){}
+  Array.prototype.forEach.call(document.querySelectorAll('.side .sec'),function(sec){
+    var h=sec.querySelector('h2'); if(!h) return;
+    var key=(h.childNodes[0]&&h.childNodes[0].nodeValue||h.textContent).trim();
+    h.classList.add('fold'); h.setAttribute('role','button'); h.setAttribute('tabindex','0'); h.setAttribute('aria-expanded',closed[key]?'false':'true');
+    if(closed[key]) sec.classList.add('closed');
+    function tog(e){ if(e&&e.target&&e.target.closest&&e.target.closest('input,label,button,select')) return;
+      var c=sec.classList.toggle('closed'); h.setAttribute('aria-expanded',c?'false':'true');
+      if(c) closed[key]=1; else delete closed[key]; try{ localStorage.setItem('twlvSecClosed',JSON.stringify(closed)); }catch(err){} }
+    h.addEventListener('click',tog);
+    h.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); tog(e); } });
+  });
+  function hdr(){ var t=document.querySelector('.top'); if(t) document.documentElement.style.setProperty('--hdr',t.offsetHeight+'px'); }
+  hdr(); window.addEventListener('resize',hdr);
+})();
 
 /* ---------- 匯入 ---------- */
 function impStat(){
