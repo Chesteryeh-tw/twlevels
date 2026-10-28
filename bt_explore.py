@@ -109,7 +109,33 @@ COND = [
     ("vol3", "爆量（均量比 ≥ 3）", "N", lambda b, d, k: _n(d.get("vr20")) >= 3),
     ("vol_low", "量縮（均量比 ≤ 0.7）", "N", lambda b, d, k: d.get("vr20") is not None and d["vr20"] <= 0.7),
     ("sr_hi", "券資比 ≥ 20%", "N", lambda b, d, k: _g(k, "sr") is not None and k["sr"] >= 20),
+    # 10-28 當沖率＝現股當沖成交張數 ÷ 當日成交張數（data/daytrade，沒抓到的日子不算成立）
+    ("dt_lo", "當沖率 ≤ 10%", "N", lambda b, d, k: b.get("dtr") is not None and b["dtr"] <= 10),
+    ("dt_30", "當沖率 ≥ 30%", "N", lambda b, d, k: b.get("dtr") is not None and b["dtr"] >= 30),
+    ("dt_50", "當沖率 ≥ 50%", "N", lambda b, d, k: b.get("dtr") is not None and b["dtr"] >= 50),
 ]
+
+
+def load_daytrade(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "daytrade")):
+    """{日期: {代號: 當沖張數}}；沒有資料夾就回空 dict。"""
+    out = {}
+    if not os.path.isdir(path):
+        return out
+    for f in os.listdir(path):
+        if not f.endswith(".txt"):
+            continue
+        m = {}
+        with open(os.path.join(path, f), encoding="utf-8") as fh:
+            next(fh, None)
+            for line in fh:
+                p = line.split(",")
+                if len(p) >= 2:
+                    try:
+                        m[p[0]] = float(p[1])
+                    except ValueError:
+                        pass
+        out[f[:8]] = m
+    return out
 
 # 小哥情境（網站「情境」頁同一份定義）；hot 方向是「—」，放中性
 XIAOGE = ["p1", "p2", "p3", "b1", "b4", "c2", "c5", "c7",
@@ -132,12 +158,9 @@ def _r(x, n=3):
     return None if x is None else round(float(x), n)
 
 
-def main():
-    args = sys.argv[1:]
-    if "--adjust" in args:
-        B.ADJUST = True
-    limit = next((int(a) for a in args if a.isdigit()), None)
-
+def evaluator():
+    """回傳 (conds, ev)：conds＝[(key, 標籤, 分組)]；ev(base, d, k, st, i) → bytearray（每個條件 0／1）。
+    bt_explore 與 study_anatomy 共用，定義只寫這一份。要在 B.PRESETS 清空之前呼叫。"""
     presets = dict(B.PRESETS)
     xg = []
     for p in XIAOGE:
@@ -146,6 +169,51 @@ def main():
             grp = "XL" if side == "多" else ("XS" if side == "空" else "N")
             xg.append(("x_" + p, "小哥·" + lab, grp, spec))
     conds = [(k, lab, g) for k, lab, g, _ in COND] + [(k, lab, g) for k, lab, g, _ in xg]
+    nC = len(conds)
+    off = len(COND)
+    DT = load_daytrade()
+    print("當沖資料 %d 天" % len(DT))
+
+    def ev(base, d, k, st, i, code=None, day=None):
+        c, h, l, o = st["c"], st["h"], st["l"], st["o"]
+        b = dict(base)
+        if DT and code and day in DT and base.get("lot"):
+            v = DT[day].get(code)
+            if v is not None:
+                b["dtr"] = v / base["lot"] * 100
+        if i >= 20 and c[i] is not None:
+            prev = [x for x in c[i - 20:i] if x is not None]
+            if len(prev) >= 15:
+                b["hi20"] = c[i] > max(prev)
+                b["lo20"] = c[i] < min(prev)
+        if i >= 1 and o[i] is not None and h[i - 1] is not None and l[i - 1] is not None:
+            b["gapU"] = o[i] > h[i - 1]
+            b["gapD"] = o[i] < l[i - 1]
+        bits = bytearray(nC)
+        for j, (_, _, _, f) in enumerate(COND):
+            try:
+                if f(b, d, k):
+                    bits[j] = 1
+            except (TypeError, KeyError):
+                pass
+        for j, (_, _, _, spec) in enumerate(xg):
+            try:
+                if B.passes(spec, base, d, k):
+                    bits[off + j] = 1
+            except (TypeError, KeyError):
+                pass
+        return bits
+
+    return conds, ev
+
+
+def main():
+    args = sys.argv[1:]
+    if "--adjust" in args:
+        B.ADJUST = True
+    limit = next((int(a) for a in args if a.isdigit()), None)
+
+    conds, ev = evaluator()
     nC = len(conds)
 
     # 只要收集，不要原本的情境（省時間）
@@ -160,31 +228,7 @@ def main():
         for code, mkt, base, d, fwd, i, st in rws:
             if base["valE"] is None or base["valE"] < 1:
                 continue
-            k = krows.get(code)
-            c, h, l, o = st["c"], st["h"], st["l"], st["o"]
-            b = dict(base)
-            if i >= 20 and c[i] is not None:
-                prev = [x for x in c[i - 20:i] if x is not None]
-                if len(prev) >= 15:
-                    b["hi20"] = c[i] > max(prev)
-                    b["lo20"] = c[i] < min(prev)
-            if i >= 1 and o[i] is not None and h[i - 1] is not None and l[i - 1] is not None:
-                b["gapU"] = o[i] > h[i - 1]
-                b["gapD"] = o[i] < l[i - 1]
-            bits = bytearray(nC)
-            for j, (_, _, _, f) in enumerate(COND):
-                try:
-                    if f(b, d, k):
-                        bits[j] = 1
-                except (TypeError, KeyError):
-                    pass
-            off = len(COND)
-            for j, (_, _, _, spec) in enumerate(xg):
-                try:
-                    if B.passes(spec, base, d, k):
-                        bits[off + j] = 1
-                except (TypeError, KeyError):
-                    pass
+            bits = ev(base, d, krows.get(code), st, i, code, day)
             R_day.append(di)
             R_bits.append(bytes(bits))
             R_ret.append(tuple(np.nan if fwd.get(hh) is None else fwd[hh] for hh in HS))

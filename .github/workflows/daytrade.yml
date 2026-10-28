@@ -1,0 +1,54 @@
+name: 現股當沖（證交所＋櫃買，2021 起）
+
+# 2026-10-28 使用者同意抓。每天全市場每檔的當沖成交張數與金額，存 Actions 快取（不進 repo）。
+# 已抓過的日子跳過；第一次補 2021 起約 1,400 天、約 1.5～2 小時。
+# 網站拒絕連線就停（連續 10 天抓不完整），不換位址、不偽裝。
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "最多抓幾天（0＝全部；測試填 5）"
+        default: "0"
+  schedule:
+    - cron: '40 12 * * 1-5'      # 台北 20:40，當天資料已公布；只會補缺的那一兩天
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daytrade
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # 交易日清單：用 FinMind 補好的 2330 完整歷史（只讀，不存回）
+      - name: 還原日線歷史（取交易日清單）
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: finmind-hist-2021-01-01-
+          restore-keys: |
+            finmind-hist-2021-01-01-
+            finmind-hist-
+      - name: 還原當沖快取
+        uses: actions/cache/restore@v4
+        with:
+          path: data/daytrade
+          key: daytrade-
+          restore-keys: |
+            daytrade-
+      - name: 抓當沖
+        run: python daytrade_fetch.py --start 20210101 --limit "${{ inputs.limit || '0' }}"
+      - name: 存當沖快取
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/daytrade
+          key: daytrade-${{ github.run_id }}
