@@ -307,29 +307,60 @@ var INST={fgn:['外資','--c1'],inv:['投信','--c3'],dlr:['自營商','--c2'],d
 var INSTK=['fgn','inv','dlr','dS','dH','isum'];
 function instVal(r,k){ if(!r) return null; return k==='fgn'?r.fgn : k==='inv'?r.inv : k==='dlr'?sumN(r.dS,r.dH) : k==='dS'?r.dS : k==='dH'?r.dH : sumN(r.fgn,r.inv,r.dS,r.dH); }
 
-/* ---------- IndexedDB：分點資料只存本機 ---------- */
+/* ---------- IndexedDB：分點資料只存本機 ----------
+   10-28 改版：每檔股票一筆（store 'stk'，key＝代號，{bk:{日期:[列]}, st:{日期:狀態}}），開哪檔才讀哪檔；
+   kv 只放分類表與摘要。35 天全市場約 190 萬列，舊版一次放進記憶體會卡住。 */
 var DB=null;
 function idb(){ return new Promise(function(res){
   if(DB) return res(DB);
   try{
-    var rq=indexedDB.open('twlvBroker',1);
-    rq.onupgradeneeded=function(){ var d=rq.result; if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); };
+    var rq=indexedDB.open('twlvBroker',2);
+    rq.onupgradeneeded=function(){ var d=rq.result;
+      if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+      if(!d.objectStoreNames.contains('stk')) d.createObjectStore('stk'); };
     rq.onsuccess=function(){ DB=rq.result; res(DB); };
     rq.onerror=function(){ res(null); };
   }catch(e){ res(null); }
 });}
-function idbGet(k){ return idb().then(function(d){ return new Promise(function(res){
+function idbGet(k,store){ return idb().then(function(d){ return new Promise(function(res){
   if(!d) return res(null);
-  try{ var r=d.transaction('kv').objectStore('kv').get(k); r.onsuccess=function(){res(r.result||null);}; r.onerror=function(){res(null);}; }catch(e){ res(null); }
+  try{ var r=d.transaction(store||'kv').objectStore(store||'kv').get(k); r.onsuccess=function(){res(r.result||null);}; r.onerror=function(){res(null);}; }catch(e){ res(null); }
 });});}
-function idbPut(k,v){ return idb().then(function(d){ return new Promise(function(res){
+function idbPut(k,v,store){ return idb().then(function(d){ return new Promise(function(res){
   if(!d) return res(false);
-  try{ var tx=d.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; }catch(e){ res(false); }
+  try{ var tx=d.transaction(store||'kv','readwrite'); tx.objectStore(store||'kv').put(v,k); tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; tx.onabort=function(){res(false);}; }catch(e){ res(false); }
+});});}
+function idbDel(k,store){ return idb().then(function(d){ return new Promise(function(res){
+  if(!d) return res(false);
+  try{ var tx=d.transaction(store||'kv','readwrite'); tx.objectStore(store||'kv').delete(k); tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; }catch(e){ res(false); }
+});});}
+// 一個檔案讀完：把每檔股票這幾天的列併進它自己的那一筆（同一次匯入，第一次碰到某檔某天就整天取代）
+function idbMerge(byCode, stByCode, seen){ return idb().then(function(d){ return new Promise(function(res){
+  if(!d) return res(false);
+  try{
+    var tx=d.transaction('stk','readwrite'), os=tx.objectStore('stk');
+    var codes=Object.keys(byCode); Object.keys(stByCode).forEach(function(c){ if(!byCode[c]) codes.push(c); });
+    codes.forEach(function(c){
+      var g=os.get(c);
+      g.onsuccess=function(){
+        var rec=g.result||{bk:{},st:{}}; rec.bk=rec.bk||{}; rec.st=rec.st||{};
+        var days=byCode[c]||{};
+        Object.keys(days).forEach(function(dd){ var key=c+'|'+dd;
+          if(!seen[key]){ rec.bk[dd]=[]; seen[key]=1; }
+          Array.prototype.push.apply(rec.bk[dd],days[dd]); });
+        var sts=stByCode[c]||{}; Object.keys(sts).forEach(function(dd){ rec.st[dd]=sts[dd]; });
+        os.put(rec,c);
+      };
+    });
+    tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; tx.onabort=function(){res(false);};
+  }catch(e){ res(false); }
 });});}
 function idbClear(){ return idb().then(function(d){ return new Promise(function(res){
   if(!d) return res(false);
-  try{ var tx=d.transaction('kv','readwrite'); tx.objectStore('kv').clear(); tx.oncomplete=function(){res(true);}; }catch(e){ res(false); }
+  try{ var tx=d.transaction(['kv','stk'],'readwrite'); tx.objectStore('kv').clear(); tx.objectStore('stk').clear(); tx.oncomplete=function(){res(true);}; }catch(e){ res(false); }
 });});}
+function loadBk(code){ return idbGet(code,'stk').then(function(rec){
+  S.bk={}; S.status={}; if(rec){ S.bk[code]=rec.bk||{}; S.status[code]=rec.st||{}; } }); }
 
 /* ---------- CSV ---------- */
 function parseCSV(text){
@@ -1016,7 +1047,7 @@ function bkStreak(code,iEnd,name,sgn){
 function bkOcc(code,iEnd,name,N){
   var net=0,vol=0,seen=0,obs=0;
   for(var i=Math.max(0,iEnd-N+1);i<=iEnd;i++){ var p=S.px[i]; if(p.v!=null) vol+=p.v; if(bkHas(code,i)){ obs++; var n=bkNet(code,i,name); if(n!=null){ net+=n; seen++; } } }
-  return {pct: vol>0? net/vol*100 : null, seen:seen, obs:obs, n:Math.min(N,iEnd+1)};
+  return {pct: (vol>0&&seen>0)? net/vol*100 : null, seen:seen, obs:obs, n:Math.min(N,iEnd+1)};
 }
 function behaviorOf(code,iEnd,name,row){
   var W=Math.max(5,Math.round(S.cfg.bhW)), out=[], flips=[], shorts=0;
@@ -1119,7 +1150,7 @@ function renderBrokers(){
   $('bkSub').textContent=iso(d);
   if(!rows){
     var hasAny = S.bk[S.code] && Object.keys(S.bk[S.code]).length;
-    $('bk').innerHTML='<div class="empty">'+(hasAny?'這一天沒有分點資料（未觀察到）':(Object.keys(S.bk).length?'這檔股票還沒有匯入分點資料':'尚未匯入分點資料。按「匯入分點資料」選 GPT 整理的檔案'))+'</div>';
+    $('bk').innerHTML='<div class="empty">'+(hasAny?'這一天沒有分點資料（未觀察到）':((S.sum&&S.sum.codes)?'這檔股票還沒有匯入分點資料':'尚未匯入分點資料。按「匯入分點資料」選 GPT 整理的檔案'))+'</div>';
     return;
   }
   var close=(S.px[idxOf(d)]||{}).c;
@@ -1136,11 +1167,11 @@ function renderBrokers(){
     var bl=num(r.buy_lots), sl=num(r.sell_lots);
     h.push('<tr class="row'+(on?' on':'')+'" data-b="'+esc(r.broker)+'"><td><span class="star">'+(on?'★':'')+'</span><span class="bname" title="'+esc(r.broker)+'">'+esc(r.broker)+'</span>'+
       (bh.length?bh.map(function(x){ return '<span class="bh">'+x+'</span>'; }).join(''):'')+'</td>'+
-      (anyCls?'<td>'+tagOf(r.broker)+'</td>':'')+'<td class="'+cls(n)+'">'+fmtS(n)+'</td>'+
+      (anyCls?'<td>'+tagOf(r.broker)+'</td>':'')+'<td class="'+cls(n)+'">'+(n==null?NA:fmtS(n))+'</td>'+
       '<td>'+(st.n?(st.ge?'≥':'')+st.n:'—')+'</td><td class="'+cls(oc.pct)+'" title="上榜 '+oc.seen+'/'+oc.n+' 天">'+(oc.pct==null?'—':fmtP(oc.pct,1))+'</td>'+
       '<td>'+(ap==null?'—':ap.toFixed(2))+'</td><td class="'+cls(gap)+'">'+fmtP(gap,1)+'</td>'+
-      '<td>'+(r.buy_lots===''?'<span class="mu" title="來源空白">—</span>':fmt0(bl))+'</td>'+
-      '<td>'+(r.sell_lots===''?'<span class="mu" title="來源空白">—</span>':fmt0(sl))+'</td><td>'+(bl!=null&&sl!=null?fmt0(bl+sl):'—')+'</td></tr>');
+      '<td>'+(bl==null?NA:fmt0(bl))+'</td>'+
+      '<td>'+(sl==null?NA:fmt0(sl))+'</td><td>'+(bl!=null&&sl!=null?fmt0(bl+sl):NA)+'</td></tr>');
   });
   h.push('</tbody></table></div>');
   var meta=[]; var hm=rows[0]&&rows[0].history_mode; if(hm==='reconstructed') meta.push('<span class="badge warn" title="事後補抓：只能當觀察值">事後補抓</span>');
@@ -1181,54 +1212,68 @@ document.addEventListener('click',function(e){ if(!$('paneMenu').contains(e.targ
 
 /* ---------- 匯入 ---------- */
 function impStat(){
-  var codes=Object.keys(S.bk), days=0, rows=0;
-  codes.forEach(function(c){ var ds=Object.keys(S.bk[c]); days+=ds.length; ds.forEach(function(d){ rows+=S.bk[c][d].length; }); });
-  $('impStat').innerHTML = codes.length ?
-    '<span class="ok">已載入</span> '+codes.length+' 檔股票、'+days+' 個股票日、'+rows.toLocaleString('en-US')+' 列分點；分類表 '+Object.keys(S.cls).length+' 個分點'+
+  var m=S.sum;
+  $('impStat').innerHTML = (m&&m.codes) ?
+    '<span class="ok">已載入</span> '+m.codes.toLocaleString('en-US')+' 檔股票、'+(m.dates||[]).length+' 個交易日（'+iso((m.dates||[])[0]||'')+'～'+iso((m.dates||[]).slice(-1)[0]||'')+'）、'+(m.rows||0).toLocaleString('en-US')+' 列分點；分類表 '+Object.keys(S.cls).length+' 個分點'+
     (S.mpRows?'；損益排行 '+S.mpRows+' 列（不用於計算）':'') : '尚未匯入。';
 }
+var NA='<span class="mu" title="來源空白，不是 0">未取得</span>';
+var KEEP=['side','rank','broker','buy_lots','sell_lots','net_lots','avg_price','history_mode','broker_class'];
 function onFiles(files){
-  var tasks=Array.prototype.map.call(files,function(f){ return f.text().then(function(t){ return {name:f.name,text:t}; }); });
-  Promise.all(tasks).then(function(list){
-    var msg=[], nB=0, nC=0, nS=0, bad=[];
-    list.forEach(function(f){
-      var rows; try{ rows=parseCSV(f.text); }catch(e){ bad.push(f.name); return; }
-      if(!rows.length){ bad.push(f.name+'（空檔）'); return; }
-      var h=rows[0];
+  files=Array.prototype.slice.call(files).sort(function(a,b){ return a.name<b.name?-1:1; });
+  var nB=0, nC=0, nS=0, bad=[], skip=[], seen={}, sum=S.sum||{codes:0,dates:[],rows:0,codeList:[]};
+  var codeSet={}; (sum.codeList||[]).forEach(function(c){ codeSet[c]=1; });
+  var dateSet={}; (sum.dates||[]).forEach(function(d){ dateSet[d]=1; });
+  var impRows={}, ok=true, k=0;
+  function step(){
+    if(k>=files.length) return finish();
+    var f=files[k++];
+    $('impStat').innerHTML='匯入中… '+k+' / '+files.length+'（'+esc(f.name)+'）。檔案多時要幾分鐘，請不要關掉頁面。';
+    f.text().then(function(t){
+      var rows; try{ rows=parseCSV(t); }catch(e){ bad.push(f.name); return null; }
+      t=null;
+      if(!rows.length){ skip.push(f.name); return null; }
+      var h=rows[0], byCode={}, stBy={};
       if('side' in h && 'net_lots' in h && 'broker' in h){
         rows.forEach(function(r){
           var c=r.stock_code, d=(r.trade_date||'').replace(/-/g,''); if(!c||d.length!==8) return;
-          (S.bk[c]=S.bk[c]||{});
-          if(!S.bk[c]._seen) Object.defineProperty(S.bk[c],'_seen',{value:{},enumerable:false,writable:true});
-          if(!S.bk[c]._seen[d+'|'+f.name]){ // 同一檔重新匯入：整天取代
-            S.bk[c][d]=[]; S.bk[c]._seen[d+'|'+f.name]=true; }
-          S.bk[c][d].push({side:r.side,rank:r.rank,broker:r.broker,buy_lots:r.buy_lots,sell_lots:r.sell_lots,
-            net_lots:r.net_lots,avg_price:r.avg_price,history_mode:r.history_mode,broker_class:r.broker_class});
-          nB++;
+          var o={}; KEEP.forEach(function(x){ o[x]=r[x]; });
+          ((byCode[c]=byCode[c]||{})[d]=byCode[c][d]||[]).push(o);
+          if(!codeSet[c]){ codeSet[c]=1; } dateSet[d]=1;
+          impRows[d]=(impRows[d]||0)+1; nB++;
         });
       } else if('classification_status' in h && 'broker' in h){
         rows.forEach(function(r){ S.cls[r.broker]=r; nC++; });
       } else if('branch_status_qc' in h){
-        rows.forEach(function(r){ var d=(r.trade_date||'').replace(/-/g,''); (S.status[r.stock_code]=S.status[r.stock_code]||{})[d]=r; nS++; });
+        rows.forEach(function(r){ var d=(r.trade_date||'').replace(/-/g,''); if(!r.stock_code||d.length!==8) return; (stBy[r.stock_code]=stBy[r.stock_code]||{})[d]=r; nS++; });
       } else if('ranking_type' in h){
         S.mpRows+=rows.length;
-      } else bad.push(f.name+'（看不懂的欄位）');
+      } else { bad.push(f.name+'（看不懂的欄位）'); return null; }
+      rows=null;
+      if(!Object.keys(byCode).length&&!Object.keys(stBy).length) return null;
+      return idbMerge(byCode,stBy,seen).then(function(r){ if(!r) ok=false; });
+    }).then(function(){ setTimeout(step,0); }, function(){ bad.push(f.name); setTimeout(step,0); });
+  }
+  function finish(){
+    // 摘要：每天幾列（同一天重新匯入就取代，不重複加）
+    sum.codeList=Object.keys(codeSet); sum.codes=sum.codeList.length; sum.dates=Object.keys(dateSet).sort();
+    sum.dayRows=sum.dayRows||{}; Object.keys(impRows).forEach(function(d){ sum.dayRows[d]=impRows[d]; });
+    sum.rows=Object.keys(sum.dayRows).reduce(function(a,d){ return a+sum.dayRows[d]; },0)||((sum.rows||0)+nB); S.sum=sum;
+    idbPut('meta',{cls:S.cls,mpRows:S.mpRows,sum:sum}).then(function(ok2){
+      return loadBk(S.code).then(function(){
+        impStat();
+        $('impStat').innerHTML+='<br>這次讀到：分點 '+nB.toLocaleString('en-US')+' 列、分類 '+nC+' 列、狀態 '+nS+' 列'+(skip.length?'；只有表頭、略過（休市日或當天沒資料，不是 0）：'+esc(skip.join('、')):'')+(bad.length?'；<span class="bad">無法讀取：'+esc(bad.join('、'))+'</span>':'')+((ok&&ok2)?'':'；<span class="bad">瀏覽器空間不足或不允許存檔，部分資料沒存到</span>');
+        var bk=S.bk[S.code];
+        if(bk && !bk[S.sel]){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
+        fillData(); renderSide(); renderTrack(); drawBand(); renderRange();
+      });
     });
-    // 去掉輔助標記後存檔
-    var store={}; Object.keys(S.bk).forEach(function(c){ store[c]={}; Object.keys(S.bk[c]).forEach(function(d){ store[c][d]=S.bk[c][d]; }); });
-    idbPut('data',{bk:store,cls:S.cls,status:S.status,mpRows:S.mpRows}).then(function(ok){
-      impStat();
-      $('impStat').innerHTML+='<br>這次讀到：分點 '+nB+' 列、分類 '+nC+' 列、狀態 '+nS+' 列'+(bad.length?'；<span class="bad">無法讀取：'+esc(bad.join('、'))+'</span>':'')+(ok?'':'；<span class="bad">瀏覽器不允許存檔，關掉頁面後要重新匯入</span>');
-      // 目前這檔有分點資料、但選的日子沒有 → 跳到最後一個有分點的日子
-      var bk=S.bk[S.code];
-      if(bk && !bk[S.sel]){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
-      fillData(); renderSide(); renderTrack(); drawBand(); renderRange();
-    });
-  });
+  }
+  step();
 }
 $('impBtn').onclick=$('impBtn2').onclick=function(){ $('impFile').click(); };
 $('impFile').onchange=function(){ if(this.files&&this.files.length) onFiles(this.files); this.value=''; };
-$('clrBtn').onclick=function(){ idbClear().then(function(){ S.bk={}; S.cls={}; S.status={}; S.mpRows=0; S.track=[]; impStat(); renderTrack(); buildChart(); renderSide(); }); };
+$('clrBtn').onclick=function(){ idbClear().then(function(){ S.bk={}; S.cls={}; S.status={}; S.mpRows=0; S.sum=null; S.track=[]; impStat(); renderTrack(); buildChart(); renderSide(); }); };
 
 /* ---------- 切換 ---------- */
 function bindSeg(id,attr,fn){
@@ -1248,7 +1293,7 @@ function open(code){
     for(var c in S.names) if(S.names[c]===code){ code=c; break; }
   }
   $('info').textContent='載入 '+code+'…';
-  loadStock(code).then(function(r){
+  Promise.all([loadStock(code),loadBk(code)]).then(function(rr){ var r=rr[0];
     S.code=code; S.px=r[0]; S.pat=r[2]||[]; S.smc=r[3]||null; S.chip=r[1].chip; S.tdcc=r[1].tdcc; S.qfii=r[1].qfii||[]; S.hover=null;
     S.sel = S.px.length ? S.px[S.px.length-1].d : null;
     // 有分點資料時，預設選最後一個有分點的交易日
@@ -1266,9 +1311,18 @@ if(mq.addEventListener) mq.addEventListener('change',function(){ if(chart) build
 
 if(!LC){ $('info').innerHTML='<span class="bad">圖表元件載入失敗，請檢查網路後重新整理。</span>'; return; }
 renderPaneMenu();
-Promise.all([loadNames(),loadShares(),idbGet('data')]).then(function(r){
-  var saved=r[2];
-  if(saved){ S.bk=saved.bk||{}; S.cls=saved.cls||{}; S.status=saved.status||{}; S.mpRows=saved.mpRows||0; }
+// 舊版（10-27 以前）整包存在 kv 'data'：第一次打開時搬到每檔一筆，搬完刪掉
+function migrate(){ return idbGet('data').then(function(old){
+  if(!old||!old.bk) return idbGet('meta');
+  var byCode={}, st={}, rows=0, dates={};
+  Object.keys(old.bk).forEach(function(c){ byCode[c]=old.bk[c]; Object.keys(old.bk[c]).forEach(function(d){ dates[d]=1; rows+=old.bk[c][d].length; }); });
+  Object.keys(old.status||{}).forEach(function(c){ st[c]=old.status[c]; });
+  var meta={cls:old.cls||{},mpRows:old.mpRows||0,sum:{codeList:Object.keys(byCode),codes:Object.keys(byCode).length,dates:Object.keys(dates).sort(),rows:rows}};
+  return idbMerge(byCode,st,{}).then(function(){ return idbPut('meta',meta); }).then(function(){ return idbDel('data'); }).then(function(){ return meta; });
+}); }
+Promise.all([loadNames(),loadShares(),migrate()]).then(function(r){
+  var meta=r[2];
+  if(meta){ S.cls=meta.cls||{}; S.mpRows=meta.mpRows||0; S.sum=meta.sum||null; }
   impStat();
   open((location.hash||'').slice(1)||'1101');
 });
