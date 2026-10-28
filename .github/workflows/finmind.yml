@@ -40,6 +40,10 @@ on:
         description: "大漲／大跌前的條件解剖，存成 data/study_anatomy.json"
         type: boolean
         default: false
+      pullback:
+        description: "回踩支撐反彈／反彈壓回（64 格），存成 data/bt_pullback.json"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -180,6 +184,11 @@ jobs:
         if: inputs.mode == 'full' && inputs.squeeze
         run: python bt_squeeze.py
 
+      # 2026-10-28：回踩支撐反彈，事先登記寫在 bt_pullback.py 開頭
+      - name: 回踩反彈回測
+        if: inputs.mode == 'full' && inputs.pullback
+        run: python bt_pullback.py
+
       # 2026-10-28：大漲／大跌前的條件解剖（事後描述，不是訊號）
       - name: 大漲大跌解剖
         if: inputs.mode == 'full' && inputs.anatomy
@@ -202,7 +211,7 @@ jobs:
           # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
           run_git(){ out=$("$@" 2>&1) && rc=0 || rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
           ls -la data/bt_series.json backtest.json data/bt_tags.json || true
-          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_h1.json data/bt_explore_h5.json data/bt_explore_h10.json data/bt_explore_h20.json data/bt_explore_curve_1.json data/bt_explore_curve_5.json data/bt_explore_curve_10.json data/bt_explore_curve_20.json data/bt_patterns.json data/bt_smc.json data/bt_squeeze.json data/bt_patexit.json data/study_anatomy.json 2>/dev/null)
+          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_h1.json data/bt_explore_h5.json data/bt_explore_h10.json data/bt_explore_h20.json data/bt_explore_curve_1.json data/bt_explore_curve_5.json data/bt_explore_curve_10.json data/bt_explore_curve_20.json data/bt_patterns.json data/bt_smc.json data/bt_squeeze.json data/bt_patexit.json data/study_anatomy.json data/bt_pullback.json 2>/dev/null)
           if git diff --cached --quiet; then
             echo "沒有變動"
           else
