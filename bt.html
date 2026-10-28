@@ -78,6 +78,15 @@ tr.go{cursor:pointer} tr.go:hover td{background:var(--surface2)}
 .btn{border:1px solid var(--line);background:var(--surface2);border-radius:8px;padding:6px 12px;cursor:pointer;min-height:36px}
 details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px;display:flex;align-items:center}
 #rank td:first-child{min-width:9.5em}
+#rank th.so{cursor:pointer;user-select:none}
+#rank th.so:hover{color:var(--text)}
+#rank th.on{color:var(--accent)}
+#rank th:first-child,#rank td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
+#rank tr.go:hover td:first-child{background:var(--surface2)}
+@media (max-width:620px){ #rank table{font-size:12px} #rank th,#rank td{padding:4px 4px} #rank td:first-child{min-width:7.5em} #rank .tag{font-size:11px;padding:1px 5px} }
+.rkc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+dl.vd{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:13px;margin:10px 0 0}
+dl.vd dd{margin:0;color:var(--muted)}
 @media (max-width:620px){ .kpi{grid-template-columns:repeat(2,minmax(0,1fr))} .ctl{grid-template-columns:minmax(0,1fr)} .hm{display:none} }
 </style>
 </head>
@@ -109,8 +118,18 @@ details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px
 
   <section class="card">
     <div class="head"><b>排行</b><span class="note" id="rkSub"></span></div>
-    <p class="note" style="margin:4px 0 8px">同方向、同持有天數，t 值最高的 20 組。點一列看細節。組合越多越容易碰巧好看，先看「兩段都成立」。</p>
+    <p class="note" style="margin:4px 0 8px">同方向、同持有天數。點欄位名稱排序（再點一次反過來），點一列看細節。組合越多越容易碰巧好看，先看「兩段都成立」。</p>
+    <div class="rkc"><div class="seg" id="rkKind"><button data-v="all">全部</button><button data-v="1">單項</button><button data-v="2">兩項組合</button></div>
+      <div class="seg" id="rkN"><button data-v="20">前 20</button><button data-v="50">前 50</button><button data-v="0">全部</button></div></div>
     <div class="tw" id="rank"></div>
+    <details style="margin-top:8px"><summary>「判斷」是什麼意思</summary>
+    <dl class="vd">
+      <dt><span class="tag p">兩段都成立</span></dt><dd>扣成本後有賺、贏大盤且 t ≥ 2，而且 2021-02～2025-08 也成立。</dd>
+      <dt><span class="tag w">只在部分期間</span></dt><dd>全期間有賺也贏大盤，但 2021-02～2025-08 那段不成立，多半只是近一年好。</dd>
+      <dt><span class="tag w">贏大盤但賠錢</span></dt><dd>比同一天全市場平均好（超額 &gt; 0、t ≥ 2），但扣掉手續費和稅後是賠的。常見於大盤跌的時候：大家跌 3%、它跌 1%，贏大盤，但你照做還是賠。只能當「不要反方向做」的參考，不能拿來進場。</dd>
+      <dt><span class="tag n">反指標</span></dt><dd>t ≤ −2：照這個方向做，穩定比大盤差，反過來想才有意義。</dd>
+      <dt><span class="tag">測不出來</span></dt><dd>跟大盤差不多，或差距不穩定（t 不到 2）。</dd>
+    </dl></details>
   </section>
 
   <section class="card">
@@ -128,7 +147,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px
 (function(){
 'use strict';
 var $=function(id){ return document.getElementById(id); };
-var D=null, CV={}, S={dir:'L',h:'10',c1:'',c2:''};
+var D=null, CV={}, S={dir:'L',h:'10',c1:'',c2:'',rk:'t',rkd:'-1',kind:'all',rn:'20'};
 try{ var sv=JSON.parse(localStorage.getItem('twlvBT')||'{}'); for(var k in sv) if(k in S) S[k]=sv[k]; }catch(e){}
 function save(){ try{ localStorage.setItem('twlvBT',JSON.stringify(S)); }catch(e){} }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
@@ -200,15 +219,25 @@ function curve(k){
     '<polyline fill="none" stroke="'+col+'" stroke-width="1.8" vector-effect="non-scaling-stroke" points="'+pts.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ')+'"/></svg>'+
     '<div class="cap"><span>'+CV[hz].start.slice(0,4)+'</span><span>累計超額 '+(last>0?'+':'')+last.toFixed(0)+' 點（不是資金曲線）</span><span>'+CV[hz].end.slice(0,4)+'</span></div>';
 }
+var TAGO={'兩段都成立':4,'只在部分期間':3,'贏大盤但賠錢':2,'測不出來':1,'反指標':0};
+var RKC=[['name','條件'],['n','筆數'],['win','勝率'],['ex','超額'],['t','t'],['net','淨'],['tag','判斷']];
 function rank(){
   var rows=[];
-  Object.keys(D.combos).forEach(function(k){ var x=D.combos[k][S.h]&&D.combos[k][S.h][S.dir]; if(x&&nn(x.t)) rows.push([k,x]); });
-  rows.sort(function(a,b){ return b[1].t-a[1].t; });
-  $('rkSub').textContent=(S.dir==='L'?'做多':'做空')+'、抱 '+S.h+' 天';
-  $('rank').innerHTML='<table class="mono"><thead><tr><th>條件</th><th class="hm">筆數</th><th class="hm">勝率</th><th>超額</th><th>t</th><th>淨</th><th>判斷</th></tr></thead><tbody>'+
-    rows.slice(0,20).map(function(r){ var x=r[1], v=verdict(x), ks=r[0].split('|');
-      return '<tr class="go" data-k="'+esc(r[0])+'"><td style="font-family:inherit">'+esc(ks.map(lab).join(' ＋ '))+'</td><td class="hm">'+x.n.toLocaleString('en-US')+'</td><td class="hm">'+x.win.toFixed(0)+'%</td>'+
+  Object.keys(D.combos).forEach(function(k){
+    var m=k.split('|').length; if(S.kind!=='all'&&String(m)!==S.kind) return;
+    var x=D.combos[k][S.h]&&D.combos[k][S.h][S.dir]; if(x&&nn(x.t)) rows.push({k:k,x:x,name:k.split('|').map(lab).join(' ＋ '),v:verdict(x)}); });
+  var f=S.rk, sg=+S.rkd;
+  function val(r){ if(f==='name') return r.name; if(f==='tag') return TAGO[r.v.tag[1]]*1000+(r.x.t||0); var z=r.x[f]; return nn(z)?z:-1e9; }
+  rows.sort(function(a,b){ var A=val(a),B=val(b), c=f==='name'?A.localeCompare(B,'zh-Hant'):(A<B?-1:A>B?1:0); return sg*c; });
+  var n=+S.rn, shown=n?rows.slice(0,n):rows;
+  $('rkSub').textContent=(S.dir==='L'?'做多':'做空')+'、抱 '+S.h+' 天｜'+shown.length+' / '+rows.length+' 組';
+  $('rank').innerHTML='<table class="mono"><thead><tr>'+RKC.map(function(c){ var on=c[0]===S.rk;
+      return '<th class="so'+(on?' on':'')+'" data-f="'+c[0]+'" aria-sort="'+(on?(sg<0?'descending':'ascending'):'none')+'">'+c[1]+(on?(sg<0?' ▼':' ▲'):'')+'</th>'; }).join('')+'</tr></thead><tbody>'+
+    shown.map(function(r){ var x=r.x, v=r.v;
+      return '<tr class="go" data-k="'+esc(r.k)+'"><td style="font-family:inherit">'+esc(r.name)+'</td><td>'+x.n.toLocaleString('en-US')+'</td><td>'+x.win.toFixed(0)+'%</td>'+
         '<td class="'+cl(x.ex)+'">'+pc(x.ex)+'</td><td>'+x.t.toFixed(1)+'</td><td class="'+cl(x.net)+'">'+pc(x.net)+'</td><td><span class="tag '+v.tag[0]+'">'+v.tag[1]+'</span></td></tr>'; }).join('')+'</tbody></table>';
+  Array.prototype.forEach.call(document.querySelectorAll('#rank th.so'),function(th){ th.onclick=function(){
+    var g=th.getAttribute('data-f'); if(S.rk===g) S.rkd=String(-S.rkd); else { S.rk=g; S.rkd=g==='name'?'1':'-1'; } save(); rank(); }; });
   Array.prototype.forEach.call(document.querySelectorAll('#rank tr.go'),function(tr){ tr.onclick=function(){
     var ks=tr.getAttribute('data-k').split('|'); S.c1=ks[0]; S.c2=ks[1]||''; $('c1').value=S.c1; $('c2').value=S.c2; save(); render(); window.scrollTo({top:0,behavior:'smooth'}); }; });
 }
@@ -232,7 +261,7 @@ fetch('data/bt_explore.json?t='+Date.now(),{cache:'no-store'}).then(function(r){
   $('c2').onchange=function(){ S.c2=this.value; save(); render(); };
   $('c3').onchange=codeOut;
   $('copy').onclick=function(){ var t=$('codeOut'); t.select(); try{ navigator.clipboard.writeText(t.value); this.textContent='已複製'; }catch(e){ document.execCommand&&document.execCommand('copy'); } };
-  bindSeg('dir','dir'); bindSeg('hold','h');
+  bindSeg('dir','dir'); bindSeg('hold','h'); bindSeg('rkKind','kind'); bindSeg('rkN','rn');
   render(); rank();
 }).catch(function(){ $('res').innerHTML='<p class="note">還沒有回測工具的資料（要先在 GitHub Actions 跑一次）。</p>'; });
 })();
