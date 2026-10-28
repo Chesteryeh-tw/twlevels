@@ -179,7 +179,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
-          run_git(){ out=$("$@" 2>&1); rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
+          run_git(){ out=$("$@" 2>&1) && rc=0 || rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
           ls -la data/bt_series.json backtest.json data/bt_tags.json || true
           run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_h1.json data/bt_explore_h5.json data/bt_explore_h10.json data/bt_explore_h20.json data/bt_explore_curve_1.json data/bt_explore_curve_5.json data/bt_explore_curve_10.json data/bt_explore_curve_20.json data/bt_patterns.json data/bt_smc.json data/bt_squeeze.json data/bt_patexit.json 2>/dev/null)
           if git diff --cached --quiet; then
