@@ -256,6 +256,11 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
     </section>
 
     <section class="card sec">
+      <h2>財報 <span class="sub" id="finSub">官方最新一季</span></h2>
+      <div id="fin"><div class="empty">讀取中…</div></div>
+    </section>
+
+    <section class="card sec">
       <h2>分點明細 <span class="sub" id="bkSub"></span></h2>
       <div class="tabs seg" id="side" role="group" aria-label="買方或賣方" style="display:flex">
         <button data-s="buy" class="on">買方 15</button><button data-s="sell">賣方 15</button>
@@ -1101,6 +1106,7 @@ function behaviorOf(code,iEnd,name,row){
 
 /* ---------- 側欄 ---------- */
 function renderSide(){
+  try{ renderFin(); }catch(e){}
   var d=S.sel; if(!d) return;
   $('selDate').textContent=iso(d)+(S.days>1?' 往前 '+S.days+' 個交易日':'');
   var w=windowStats(S.code,d,S.days), out=[];
@@ -1245,6 +1251,31 @@ function renderPaneMenu(){
 }
 $('paneBtn').onclick=function(e){ e.stopPropagation(); $('paneMenu').classList.toggle('open'); };
 document.addEventListener('click',function(e){ if(!$('paneMenu').contains(e.target)) $('paneMenu').classList.remove('open'); });
+
+/* ---------- 財報（10-28，data/fin.json：證交所／櫃買開放資料最新一季，數字是今年累計） ---------- */
+var FIN=null;
+function renderFin(){
+  if(FIN===null){ FIN=false; getText('data/fin.json').then(function(t){ FIN=JSON.parse(t); renderFin(); }).catch(function(){ FIN={q:{}}; renderFin(); }); }
+  if(!FIN){ return; }
+  var L=(FIN.q||{})[S.code];
+  if(!L||!L.length){ $('fin').innerHTML='<div class="empty">還沒有這檔的季報（每天自動更新；只從最新一季開始累積）</div>'; $('finSub').textContent='官方最新一季'; return; }
+  var r=L[L.length-1], y=r[0], q=r[1];
+  function find(yy,qq){ for(var i=0;i<L.length;i++) if(L[i][0]===yy&&L[i][1]===qq) return L[i]; return null; }
+  var prev=q>1?find(y,q-1):null, ly=find(y-1,q);
+  function yi(x){ return x==null?'—':(x/1e5).toFixed(2)+' 億'; }      // 千元 → 億
+  function pct(a,b){ return (a==null||!b)?'—':(a/b*100).toFixed(1)+'%'; }
+  function g(a,b){ if(a==null||b==null||b===0) return ''; var v=(a/b-1)*100*(b<0?-1:1); return ' <span class="'+(v>=0?'r':'g')+'">'+(v>=0?'+':'')+v.toFixed(0)+'%</span>'; }
+  var qEps = prev&&r[6]!=null&&prev[6]!=null ? r[6]-prev[6] : (q===1?r[6]:null);
+  $('finSub').textContent=y+' 年第 '+q+' 季（1～'+(q*3)+' 月累計）';
+  $('fin').innerHTML='<div class="kv">'+
+    '<span class="k">營收</span><span class="v">'+yi(r[2])+(ly?g(r[2],ly[2]):'')+'</span>'+
+    '<span class="k">毛利率</span><span class="v">'+pct(r[3],r[2])+(ly&&ly[3]!=null?' <span class="mu">去年 '+pct(ly[3],ly[2])+'</span>':'')+'</span>'+
+    '<span class="k">營業利益率</span><span class="v">'+pct(r[4],r[2])+'</span>'+
+    '<span class="k">淨利（母公司）</span><span class="v">'+yi(r[5])+(ly?g(r[5],ly[5]):'')+'</span>'+
+    '<span class="k">今年累計 EPS</span><span class="v"><b>'+(r[6]==null?'—':r[6].toFixed(2)+' 元')+'</b>'+(ly&&ly[6]!=null?' <span class="mu">去年同期 '+ly[6].toFixed(2)+'</span>':'')+'</span>'+
+    '<span class="k">第 '+q+' 季單季 EPS</span><span class="v">'+(qEps==null?'<span class="mu" title="要有上一季的累計數才算得出來；資料從最新一季開始累積">還沒有上一季</span>':qEps.toFixed(2)+' 元')+'</span>'+
+    '</div><div class="note">來源：證交所、櫃買開放資料（綜合損益表，今年累計）。去年同期與單季要累積到下一季以後才有。'+(FIN.updated?'更新 '+FIN.updated:'')+'</div>';
+}
 
 /* ---------- 占量期間、側欄收合、版面（10-28） ---------- */
 (function(){
