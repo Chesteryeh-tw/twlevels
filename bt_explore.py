@@ -116,7 +116,8 @@ def main():
     combos = [(a,) for a in range(nC)] + [(a, b) for a in range(nC) for b in range(a + 1, nC)]
     split_i = next((i for i, d in enumerate(days) if d >= SPLIT), len(days))
     # 週索引（曲線用）：每 5 個交易日一點
-    out, curves = {}, {1: {}, 10: {}}
+    out, curves = {}, {h: {} for h in HS}
+    raws, cnts = {h: {} for h in HS}, {h: {} for h in HS}   # 10-28：累計淨損益用（原始報酬累計、進場日數累計）
     tested = 0
     for cb in combos:
         mask = 0
@@ -169,13 +170,21 @@ def main():
                     yr={y: round(sum(v) / len(v), 2) for y, v in sorted(years.items())})
                 if h in curves and side == "L":
                     # 週累計（做空的曲線＝做多取負號，網頁自己翻）
-                    c, pts = 0.0, []
+                    c, cr, cn, pts, prs, pcs = 0.0, 0.0, 0, [], [], []
                     m = {di: v for di, v in daily}
+                    mr = {di: sum(r for r, _ in by_day[di]) / len(by_day[di]) for di in dkeys}
                     for i in range(len(days)):
                         c += m.get(i, 0.0)
+                        if i in mr:
+                            cr += mr[i]
+                            cn += 1
                         if i % 5 == 4 or i == len(days) - 1:
                             pts.append(round(c, 1))
+                            prs.append(round(cr, 1))
+                            pcs.append(cn)
                     curves[h][key] = pts
+                    raws[h][key] = prs
+                    cnts[h][key] = pcs
             res[str(h)] = hres
         if res:
             out[key] = res
@@ -191,7 +200,8 @@ def main():
         json.dump(dict(meta=meta, combos=out), fh, ensure_ascii=False, separators=(",", ":"))
     for h, cv in curves.items():
         with open(os.path.join(here, "data", "bt_explore_curve_%d%s.json" % (h, sfx)), "w", encoding="utf-8") as fh:
-            json.dump(dict(start=days[0], end=days[-1], step=5, curves=cv), fh, separators=(",", ":"))
+            json.dump(dict(start=days[0], end=days[-1], step=5, cost=COST, curves=cv, raw=raws[h], cnt=cnts[h]), fh,
+                      separators=(",", ":"))
     print("bt_explore：%d 組有結果、試過 %d 格、運氣預期 %d 格" % (len(out), tested, lucky))
     print("::notice title=回測工具::%d 天，%d 組有結果，試過 %d 格，純運氣預期約 %d 格 |t| ≥ 2" % (len(days), len(out), tested, lucky))
 

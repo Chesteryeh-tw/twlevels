@@ -28,6 +28,14 @@ on:
         description: "SMC／ICT＋分價量表 長樣本回測（12 種，多空），存成 data/bt_smc.json"
         type: boolean
         default: false
+      squeeze:
+        description: "開布林擠壓門檻掃描（固定 vs 動態），存成 data/bt_squeeze.json"
+        type: boolean
+        default: false
+      patexit:
+        description: "K 線型態·停損＋目標價出場回測，存成 data/bt_patexit.json"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -151,6 +159,16 @@ jobs:
         if: inputs.mode == 'full' && inputs.smc
         run: python bt_smc.py
 
+      # 2026-10-28：開布林擠壓門檻掃描，事先登記寫在 bt_squeeze.py 開頭
+      - name: 擠壓門檻掃描
+        if: inputs.mode == 'full' && inputs.squeeze
+        run: python bt_squeeze.py
+
+      # 2026-10-28：型態停損＋目標價出場，事先登記寫在 bt_patexit.py 開頭
+      - name: 型態停損目標回測
+        if: inputs.mode == 'full' && inputs.patexit
+        run: python bt_patexit.py
+
       # 只 commit 報告，不 commit 原始歷史 —— 那 110 MB 留在快取裡就好，
       # 進了 repo 之後每次 checkout 都要多下載一次，而且永遠刪不掉。
       - name: 推回報告
@@ -161,7 +179,7 @@ jobs:
           # 每一步失敗都把 git 的回應寫成註記（容器讀不到 Actions 日誌，只讀得到註記）
           run_git(){ out=$("$@" 2>&1); rc=$?; if [ $rc -ne 0 ]; then echo "::error title=$1 $2 失敗::rc=$rc $(echo "$out" | tail -8 | tr '\n' ' ' | cut -c1-900)"; exit $rc; fi; }
           ls -la data/bt_series.json backtest.json data/bt_tags.json || true
-          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_curve_1.json data/bt_explore_curve_10.json data/bt_patterns.json data/bt_smc.json 2>/dev/null)
+          run_git git add -f backtest.json backtest.html data/daily.txt data/bt_tags.json data/bt_series.json $(ls backtest_adj.json data/bt_series_adj.json data/bt_explore.json data/bt_explore_curve_1.json data/bt_explore_curve_5.json data/bt_explore_curve_10.json data/bt_explore_curve_20.json data/bt_patterns.json data/bt_smc.json data/bt_squeeze.json data/bt_patexit.json 2>/dev/null)
           if git diff --cached --quiet; then
             echo "沒有變動"
           else
