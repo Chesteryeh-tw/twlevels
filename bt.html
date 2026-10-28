@@ -84,6 +84,9 @@ details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px
 #rank th:first-child,#rank td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
 #rank tr.go:hover td:first-child{background:var(--surface2)}
 @media (max-width:620px){ #rank table{font-size:12px} #rank th,#rank td{padding:4px 4px} #rank td:first-child{min-width:7.5em} #rank .tag{font-size:11px;padding:1px 5px} }
+svg.cv .ln{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke}
+.cvlg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.cvlg i{display:inline-block;width:14px;height:0;border-top:2px solid;margin-right:4px;vertical-align:3px}
 .rkc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
 dl.vd{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:13px;margin:10px 0 0}
 dl.vd dd{margin:0;color:var(--muted)}
@@ -120,7 +123,8 @@ dl.vd dd{margin:0;color:var(--muted)}
     <div class="head"><b>排行</b><span class="note" id="rkSub"></span></div>
     <p class="note" style="margin:4px 0 8px">同方向、同持有天數。點欄位名稱排序（再點一次反過來），點一列看細節。組合越多越容易碰巧好看，先看「兩段都成立」。</p>
     <div class="rkc"><div class="seg" id="rkKind"><button data-v="all">全部</button><button data-v="1">單項</button><button data-v="2">兩項組合</button></div>
-      <div class="seg" id="rkN"><button data-v="20">前 20</button><button data-v="50">前 50</button><button data-v="0">全部</button></div></div>
+      <div class="seg" id="rkN"><button data-v="20">前 20</button><button data-v="50">前 50</button><button data-v="0">全部</button></div>
+      <label class="note" style="display:flex;align-items:center;gap:6px">分組<select id="rkG" style="min-height:40px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface2)"></select></label></div>
     <div class="tw" id="rank"></div>
     <details style="margin-top:8px"><summary>「判斷」是什麼意思</summary>
     <dl class="vd">
@@ -147,18 +151,26 @@ dl.vd dd{margin:0;color:var(--muted)}
 (function(){
 'use strict';
 var $=function(id){ return document.getElementById(id); };
-var D=null, CV={}, S={dir:'L',h:'10',c1:'',c2:'',rk:'t',rkd:'-1',kind:'all',rn:'20'};
+var M=null, H={}, CV={}, S={dir:'L',h:'10',c1:'',c2:'',rk:'t',rkd:'-1',kind:'all',rn:'20',rg:''};
 try{ var sv=JSON.parse(localStorage.getItem('twlvBT')||'{}'); for(var k in sv) if(k in S) S[k]=sv[k]; }catch(e){}
 function save(){ try{ localStorage.setItem('twlvBT',JSON.stringify(S)); }catch(e){} }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function nn(x){ return x!==null&&x!==undefined&&isFinite(x); }
 function pc(x,d){ return nn(x)?(x>0?'+':'')+x.toFixed(d==null?2:d)+'%':'—'; }
 function cl(x){ return nn(x)&&x!==0?(x>0?'p':'n'):''; }
-function lab(k){ var c=D.meta.conditions; for(var i=0;i<c.length;i++) if(c[i][0]===k) return c[i][1]; return k; }
+var LAB={}, GRP={};
+function lab(k){ return LAB[k]||k; }
 function key(a,b){
   if(!a&&!b) return null; if(!b) return a; if(!a) return b; if(a===b) return a;
-  var ks=D.meta.conditions.map(function(c){return c[0];});
+  var ks=M.conditions.map(function(c){return c[0];});
   return ks.indexOf(a)<ks.indexOf(b) ? a+'|'+b : b+'|'+a;
+}
+function combos(){ return H[S.h]||{}; }
+function loadH(h){
+  if(H[h]) return Promise.resolve(H[h]);
+  if(M.version!==2) return Promise.resolve(H[h]={});
+  return fetch('data/bt_explore_h'+h+'.json?t='+Date.now(),{cache:'no-store'}).then(function(r){ return r.ok?r.json():{combos:{}}; })
+    .then(function(j){ return H[h]=j.combos||{}; }).catch(function(){ return H[h]={}; });
 }
 function verdict(x){
   var preOk = x.pre && x.pre[0]>=30 && nn(x.pre[1]) && x.pre[1]>0 && nn(x.pre[2]) && x.pre[2]>=2;
@@ -171,16 +183,26 @@ function verdict(x){
   else tag=['','測不出來'];
   return {checks:c, tag:tag};
 }
+function gorder(){ var g=M.groups||{}; var o=S.dir==='L'?['XL','L','N','XS','S']:['XS','S','N','XL','L']; return o.filter(function(x){return g[x];}); }
 function opts(sel,val,none){
-  sel.innerHTML=(none?'<option value="">（不加）</option>':'')+D.meta.conditions.map(function(c){
-    return '<option value="'+esc(c[0])+'"'+(c[0]===val?' selected':'')+'>'+esc(c[1])+'</option>'; }).join('');
+  var g=M.groups;
+  if(!g){ sel.innerHTML=(none?'<option value="">（不加）</option>':'')+M.conditions.map(function(c){ return '<option value="'+esc(c[0])+'"'+(c[0]===val?' selected':'')+'>'+esc(c[1])+'</option>'; }).join(''); return; }
+  sel.innerHTML=(none?'<option value="">（不加）</option>':'')+gorder().map(function(gk){
+    return '<optgroup label="'+esc(g[gk])+'">'+M.conditions.filter(function(c){return c[2]===gk;}).map(function(c){
+      return '<option value="'+esc(c[0])+'"'+(c[0]===val?' selected':'')+'>'+esc(c[1].replace(/^小哥·/,''))+'</option>'; }).join('')+'</optgroup>'; }).join('');
+}
+function fillSel(){
+  opts($('c1'),S.c1,false); opts($('c2'),S.c2,true); opts($('c3'),$('c3').value,true);
+  var g=M.groups;
+  $('rkG').innerHTML='<option value="">全部分組</option>'+(g?gorder().map(function(k){ return '<option value="'+k+'"'+(S.rg===k?' selected':'')+'>'+esc(g[k])+'</option>'; }).join(''):'');
+  $('rkG').parentNode.style.display=g?'':'none';
 }
 function render(){
-  if(!S.c1) S.c1=D.meta.conditions[0][0];
-  var k=key(S.c1,S.c2), x=D.combos[k]&&D.combos[k][S.h]&&D.combos[k][S.h][S.dir];
+  if(!S.c1) S.c1=M.conditions[0][0];
+  var k=key(S.c1,S.c2), cb=combos(), x=cb[k]&&cb[k][S.dir];
   var name=lab(S.c1)+(S.c2&&S.c2!==S.c1?' ＋ '+lab(S.c2):'');
   var dn=S.dir==='L'?'做多':'做空';
-  if(!x){ $('res').innerHTML='<div class="head"><b>'+esc(name)+'</b><span class="tag">樣本不足</span></div><p class="note">這個組合少於 '+D.meta.min_trades+' 筆、或同時成立的日子太少（例如互相矛盾的條件），不顯示。</p>'; codeOut(); return; }
+  if(!x){ $('res').innerHTML='<div class="head"><b>'+esc(name)+'</b><span class="tag">樣本不足</span></div><p class="note">這個組合少於 '+M.min_trades+' 筆、或同時成立的日子太少（例如互相矛盾的條件），不顯示。</p>'; codeOut(); return; }
   var v=verdict(x), yrs=Object.keys(x.yr||{});
   var h=['<div class="head"><b>'+esc(name)+'</b><span class="tag '+v.tag[0]+'">'+v.tag[1]+'</span></div>',
     '<p class="note">'+dn+'、抱 '+S.h+' 天｜'+x.n.toLocaleString('en-US')+' 筆、'+x.nd+' 個進場日</p>',
@@ -188,11 +210,11 @@ function render(){
     '<div><small>勝率</small><b>'+x.win.toFixed(1)+'%</b></div>',
     '<div><small>賺賠比</small><b>'+(nn(x.pay)?x.pay.toFixed(2):'—')+'</b></div>',
     '<div><small>平均賺／賠</small><b><span class="p">'+pc(x.aw,1)+'</span> <span class="n">'+pc(x.al,1)+'</span></b></div>',
-    '<div><small>淨（扣成本）</small><b class="'+cl(x.net)+'">'+pc(x.net)+'</b></div>',
+    '<div><small>淨（扣成本，每筆）</small><b class="'+cl(x.net)+'">'+pc(x.net)+'</b></div>',
     '<div><small>超額</small><b class="'+cl(x.ex)+'">'+pc(x.ex)+'</b></div>',
     '<div><small>t 值</small><b>'+(nn(x.t)?x.t.toFixed(1):'—')+'</b></div>',
     '<div><small title="累計超額從高點往下最大的一段">最大回落</small><b>'+x.mdd.toFixed(1)+' 點</b></div>',
-    '<div><small>2025-09 以後</small><b class="'+cl(x.post[1])+'">'+pc(x.post[1])+'</b></div>',
+    '<div><small>2025-09 以後超額</small><b class="'+cl(x.post[1])+'">'+pc(x.post[1])+'</b></div>',
     '</div>',
     '<div class="checks">'+v.checks.map(function(c){ return '<span class="'+(c.ok?'ok':'')+'">'+c.t+'</span>'; }).join('')+'</div>',
     '<div id="cv"></div>'];
@@ -203,29 +225,40 @@ function render(){
 }
 function curve(k){
   var el=$('cv'); if(!el) return;
-  var hz=S.h==='1'||S.h==='10'?S.h:null;
-  if(!hz){ el.innerHTML='<p class="note" style="margin-top:8px">累計曲線只有抱 1 天、10 天兩種。</p>'; return; }
+  var hz=S.h;
   if(!CV[hz]){ el.innerHTML='<p class="note" style="margin-top:8px">曲線讀取中…</p>';
     fetch('data/bt_explore_curve_'+hz+'.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
       .then(function(j){ CV[hz]=j||{curves:{}}; if(S.h===hz) curve(key(S.c1,S.c2)); }).catch(function(){ CV[hz]={curves:{}}; });
     return; }
-  var pts=CV[hz].curves[k]; if(!pts||!pts.length){ el.innerHTML=''; return; }
-  var sg=S.dir==='L'?1:-1; pts=pts.map(function(v){return v*sg;});
-  var lo=Math.min(0,Math.min.apply(null,pts)), hi=Math.max(0,Math.max.apply(null,pts)); if(hi===lo) hi=lo+1;
-  var W=600,H=140, X=function(i){ return 4+i*(W-8)/Math.max(1,pts.length-1); }, Y=function(v){ return H-6-(v-lo)/(hi-lo)*(H-12); };
-  var last=pts[pts.length-1], col=last>=0?'var(--res)':'var(--sup)';
-  el.innerHTML='<svg class="cv" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="累計超額 '+last.toFixed(0)+' 點">'+
+  var C=CV[hz], ex=C.curves&&C.curves[k];
+  if(!ex||!ex.length){ el.innerHTML='<p class="note" style="margin-top:8px">這個持有天數還沒有累計曲線（要重跑一次回測工具資料）。</p>'; return; }
+  var sg=S.dir==='L'?1:-1, cost=C.cost||0.386;
+  ex=ex.map(function(v){return v*sg;});
+  var net=null;
+  if(C.raw&&C.raw[k]&&C.cnt&&C.cnt[k]){ var cn=C.cnt[k]; net=C.raw[k].map(function(v,i){ return sg*v-cost*cn[i]; }); }
+  var all=ex.concat(net||[]);
+  var lo=Math.min(0,Math.min.apply(null,all)), hi=Math.max(0,Math.max.apply(null,all)); if(hi===lo) hi=lo+1;
+  var W=600,Hh=150, X=function(i){ return 4+i*(W-8)/Math.max(1,ex.length-1); }, Y=function(v){ return Hh-6-(v-lo)/(hi-lo)*(Hh-12); };
+  function line(p,col,dash){ return '<polyline class="ln" stroke="'+col+'"'+(dash?' stroke-dasharray="5 4"':'')+' points="'+p.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ')+'"/>'; }
+  var le=ex[ex.length-1], ln=net?net[net.length-1]:null;
+  var cE=le>=0?'var(--res)':'var(--sup)', cN='var(--accent)';
+  var d0=(C.dates&&C.dates[0])||C.start, d1=(C.dates&&C.dates[C.dates.length-1])||C.end;
+  el.innerHTML='<svg class="cv" viewBox="0 0 '+W+' '+Hh+'" preserveAspectRatio="none" role="img" aria-label="累計超額 '+le.toFixed(0)+' 點'+(net?'、累計淨 '+ln.toFixed(0)+' 點':'')+'">'+
     '<line x1="0" x2="'+W+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-dasharray="3 3"/>'+
-    '<polyline fill="none" stroke="'+col+'" stroke-width="1.8" vector-effect="non-scaling-stroke" points="'+pts.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ')+'"/></svg>'+
-    '<div class="cap"><span>'+CV[hz].start.slice(0,4)+'</span><span>累計超額 '+(last>0?'+':'')+last.toFixed(0)+' 點（不是資金曲線）</span><span>'+CV[hz].end.slice(0,4)+'</span></div>';
+    line(ex,cE,false)+(net?line(net,cN,true):'')+'</svg>'+
+    '<div class="cap"><span>'+String(d0).slice(0,4)+'</span><span>'+String(d1).slice(0,4)+'</span></div>'+
+    '<div class="cvlg"><span><i style="border-color:'+cE+'"></i>累計超額 '+(le>0?'+':'')+le.toFixed(0)+' 點（贏大盤多少）</span>'+
+    (net?'<span><i style="border-color:'+cN+';border-top-style:dashed"></i>累計淨損益 '+(ln>0?'+':'')+ln.toFixed(0)+' 點（扣成本後真正賺賠）</span>':'')+'</div>'+
+    '<p class="note" style="margin-top:4px">每個進場日投入一樣的錢、抱滿 '+S.h+' 天，把每天的平均報酬（%）一路加起來。持有期會重疊，不是資金曲線；看方向和穩不穩。</p>';
 }
 var TAGO={'兩段都成立':4,'只在部分期間':3,'贏大盤但賠錢':2,'測不出來':1,'反指標':0};
 var RKC=[['name','條件'],['n','筆數'],['win','勝率'],['ex','超額'],['t','t'],['net','淨'],['tag','判斷']];
 function rank(){
-  var rows=[];
-  Object.keys(D.combos).forEach(function(k){
-    var m=k.split('|').length; if(S.kind!=='all'&&String(m)!==S.kind) return;
-    var x=D.combos[k][S.h]&&D.combos[k][S.h][S.dir]; if(x&&nn(x.t)) rows.push({k:k,x:x,name:k.split('|').map(lab).join(' ＋ '),v:verdict(x)}); });
+  var rows=[], cb=combos();
+  Object.keys(cb).forEach(function(k){
+    var ks=k.split('|'); if(S.kind!=='all'&&String(ks.length)!==S.kind) return;
+    if(S.rg&&!ks.some(function(z){ return GRP[z]===S.rg; })) return;
+    var x=cb[k][S.dir]; if(x&&nn(x.t)) rows.push({k:k,x:x,name:ks.map(lab).join(' ＋ '),v:verdict(x)}); });
   var f=S.rk, sg=+S.rkd;
   function val(r){ if(f==='name') return r.name; if(f==='tag') return TAGO[r.v.tag[1]]*1000+(r.x.t||0); var z=r.x[f]; return nn(z)?z:-1e9; }
   rows.sort(function(a,b){ var A=val(a),B=val(b), c=f==='name'?A.localeCompare(B,'zh-Hant'):(A<B?-1:A>B?1:0); return sg*c; });
@@ -239,30 +272,37 @@ function rank(){
   Array.prototype.forEach.call(document.querySelectorAll('#rank th.so'),function(th){ th.onclick=function(){
     var g=th.getAttribute('data-f'); if(S.rk===g) S.rkd=String(-S.rkd); else { S.rk=g; S.rkd=g==='name'?'1':'-1'; } save(); rank(); }; });
   Array.prototype.forEach.call(document.querySelectorAll('#rank tr.go'),function(tr){ tr.onclick=function(){
-    var ks=tr.getAttribute('data-k').split('|'); S.c1=ks[0]; S.c2=ks[1]||''; $('c1').value=S.c1; $('c2').value=S.c2; save(); render(); window.scrollTo({top:0,behavior:'smooth'}); }; });
+    var ks=tr.getAttribute('data-k').split('|'); S.c1=ks[0]; S.c2=ks[1]||''; $('c1').value=S.c1; $('c2').value=S.c2; save(); render(); $('res').scrollIntoView({behavior:'smooth',block:'start'}); }; });
 }
 function codeOut(){
   var cs=[S.c1,S.c2,$('c3').value].filter(function(v,i,a){ return v&&a.indexOf(v)===i; });
   $('codeOut').value='BT|'+S.dir+'|'+S.h+'|'+cs.join(',');
 }
-function bindSeg(id,attr){
+function refresh(){ $('res').innerHTML='<p class="note">載入中…</p>'; loadH(S.h).then(function(){ render(); rank(); }); }
+function bindSeg(id,attr,after){
   Array.prototype.forEach.call($(id).querySelectorAll('button'),function(b){
     b.classList.toggle('on',b.getAttribute('data-v')===S[attr]);
-    b.onclick=function(){ S[attr]=b.getAttribute('data-v'); Array.prototype.forEach.call($(id).querySelectorAll('button'),function(x){ x.classList.toggle('on',x===b); }); save(); render(); rank(); };
+    b.onclick=function(){ S[attr]=b.getAttribute('data-v'); Array.prototype.forEach.call($(id).querySelectorAll('button'),function(x){ x.classList.toggle('on',x===b); }); save(); (after||refresh)(); };
   });
 }
 fetch('data/bt_explore.json?t='+Date.now(),{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }).then(function(j){
-  D=j; var m=D.meta;
-  $('meta').textContent=m.start.slice(0,4)+'-'+m.start.slice(4,6)+' ～ '+m.end.slice(0,4)+'-'+m.end.slice(4,6)+'，'+m.days.toLocaleString('en-US')+' 天';
-  $('warn').textContent='共 '+m.n_combos+' 組、試過 '+m.tested.toLocaleString('en-US')+' 格（組合 × 持有天數 × 方向），純靠運氣約有 '+m.lucky+' 格看起來顯著（t ≥ 2）。';
-  opts($('c1'),S.c1,false); opts($('c2'),S.c2,true); opts($('c3'),'',true);
-  if(!S.c1) S.c1=$('c1').value;
+  M=j.meta;
+  if(j.combos){ // 舊格式（10-27）：所有持有天數在同一個檔
+    [1,5,10,20].forEach(function(h){ var o={}; Object.keys(j.combos).forEach(function(k){ if(j.combos[k][h]) o[k]=j.combos[k][h]; }); H[h]=o; });
+  }
+  M.conditions.forEach(function(c){ LAB[c[0]]=c[1]; GRP[c[0]]=c[2]||''; });
+  $('meta').textContent=M.start.slice(0,4)+'-'+M.start.slice(4,6)+' ～ '+M.end.slice(0,4)+'-'+M.end.slice(4,6)+'，'+M.days.toLocaleString('en-US')+' 天、'+M.conditions.length+' 個條件';
+  $('warn').textContent='共 '+M.n_combos+' 組、試過 '+M.tested.toLocaleString('en-US')+' 格（組合 × 持有天數 × 方向），純靠運氣約有 '+M.lucky+' 格看起來顯著（t ≥ 2）。'+(M.groups?'「偏多／偏空」只是照講義的直覺分類，不代表測過。':'');
+  if(!S.c1||!LAB[S.c1]) S.c1=M.conditions[0][0];
+  if(S.c2&&!LAB[S.c2]) S.c2='';
+  fillSel();
   $('c1').onchange=function(){ S.c1=this.value; save(); render(); };
   $('c2').onchange=function(){ S.c2=this.value; save(); render(); };
   $('c3').onchange=codeOut;
+  $('rkG').onchange=function(){ S.rg=this.value; save(); rank(); };
   $('copy').onclick=function(){ var t=$('codeOut'); t.select(); try{ navigator.clipboard.writeText(t.value); this.textContent='已複製'; }catch(e){ document.execCommand&&document.execCommand('copy'); } };
-  bindSeg('dir','dir'); bindSeg('hold','h'); bindSeg('rkKind','kind'); bindSeg('rkN','rn');
-  render(); rank();
+  bindSeg('dir','dir',function(){ fillSel(); refresh(); }); bindSeg('hold','h'); bindSeg('rkKind','kind',rank); bindSeg('rkN','rn',rank);
+  refresh();
 }).catch(function(){ $('res').innerHTML='<p class="note">還沒有回測工具的資料（要先在 GitHub Actions 跑一次）。</p>'; });
 })();
 </script>

@@ -259,6 +259,7 @@ def chip_row(code, di, days, cache, price_hist, mkt, cost_cache):
         "mgnChg": (mgn - mgn_prev) if (mgn is not None and mgn_prev is not None) else None,
         "sr": (shrt / mgn * 100) if (shrt is not None and mgn and mgn > 0) else None,
         "dlrH": cur.get("dlrHedge"),
+        "dlrS": cur.get("dlrSelf"),          # 10-28：回測工具「三大法人同買」用
         "mgnRate": None,
     }
     # 融資維持率：要往回看一段才估得出平均成本，歷史不夠長就不給
