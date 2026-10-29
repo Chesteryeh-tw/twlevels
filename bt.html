@@ -98,6 +98,7 @@ dl.vd dd{margin:0;color:var(--muted)}
   <h1>回測工具</h1>
   <a href="./">← 三線點位</a>
   <a href="chips.html">籌碼看板</a>
+  <a href="watch.html">今日名單</a>
   <span class="note" id="meta"></span>
 </header>
 
@@ -143,7 +144,7 @@ dl.vd dd{margin:0;color:var(--muted)}
       <div class="ctl" style="margin-top:8px"><label>條件三<select id="c3"></select></label></div>
       <div class="code"><input id="codeOut" readonly aria-label="回測代碼"><button class="btn" id="copy">複製</button></div>
     </details>
-    <p class="note" style="margin-top:8px">做法：訊號日收盤篩選（成交金額 ≥ 1 億）→ 隔天開盤進 → 抱滿天數收盤出。超額＝減同日全市場平均；t 用每個進場日的平均；淨＝扣隔夜成本 0.386%。勝率＝照方向報酬 &gt; 0 的比例；賺賠比＝平均賺 ÷ 平均賠。價格未還原除權息。這是探索工具，數字好看不等於可以用，要先事先登記再驗證。</p>
+    <p class="note" style="margin-top:8px">做法：訊號日收盤篩選（成交金額 ≥ 1 億）→ 隔天開盤進 → 抱滿天數收盤出。超額＝減同日全市場平均；t 用每個進場日的平均；淨＝扣成本：抱 1 天是隔天開盤進、收盤出的當沖，扣 0.235%；其他扣隔夜 0.386%。勝率＝照方向報酬 &gt; 0 的比例；賺賠比＝平均賺 ÷ 平均賠。價格未還原除權息。這是探索工具，數字好看不等於可以用，要先事先登記再驗證。</p>
   </section>
 </main>
 

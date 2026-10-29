@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A1015">
+<title>今日名單</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#E9EDEF; --surface:#FFFFFF; --surface2:#F3F6F7; --sunk:#DFE6EA;
+  --text:#121A1F; --muted:#5C6E79; --line:#CFD9DF; --line2:#E4EAEE;
+  --accent:#155E7E; --accent-ink:#FFFFFF; --accent-soft:#DBEAF1;
+  --res:#C43A31; --res-bg:#F9E4E1; --mid:#9E7106; --mid-bg:#FAEFD6; --sup:#0C8A61; --sup-bg:#DAF2E7;
+  --shadow:0 1px 2px rgba(18,26,31,.06), 0 6px 18px -12px rgba(18,26,31,.35);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+    --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+    --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+    --res:#FF7C6C; --res-bg:#331A1A; --mid:#EFC257; --mid-bg:#322913; --sup:#43CF91; --sup-bg:#0E2E23;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0A1015; --surface:#131C22; --surface2:#17222A; --sunk:#0E161B;
+  --text:#E1EAF0; --muted:#8AA1AE; --line:#24323C; --line2:#1B262E;
+  --accent:#5DBEE3; --accent-ink:#07161D; --accent-soft:#11303E;
+  --res:#FF7C6C; --res-bg:#331A1A; --mid:#EFC257; --mid-bg:#322913; --sup:#43CF91; --sup-bg:#0E2E23;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 22px -14px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 "Noto Sans TC",system-ui,-apple-system,"Microsoft JhengHei",sans-serif}
+button,select,input{font:inherit;color:inherit}
+a{color:var(--accent)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.top{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:12px 16px;background:var(--sunk);border-bottom:1px solid var(--line)}
+.top h1{font-size:17px;margin:0}
+.top a{font-size:13px;text-decoration:none}
+.wrap{max-width:980px;margin:0 auto;padding:14px 16px 48px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line2);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ctl label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+.ctl select{width:100%;min-height:40px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface2)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--surface2);padding:8px 14px;cursor:pointer;min-height:40px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.lg{display:flex;gap:12px;font-size:12px;color:var(--muted)}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:baseline}
+.head b{font-size:16px}
+.tag{border-radius:6px;padding:2px 8px;font-size:12px;font-weight:500;background:var(--surface2);color:var(--muted)}
+.tag.p{background:var(--res-bg);color:var(--res)} .tag.n{background:var(--sup-bg);color:var(--sup)} .tag.w{background:var(--mid-bg);color:var(--mid)}
+.kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
+.kpi div{background:var(--surface2);border-radius:8px;padding:6px 10px;min-width:0}
+.kpi small{display:block;font-size:11px;color:var(--muted)}
+.kpi b{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500}
+.p{color:var(--res)} .n{color:var(--sup)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin-top:10px}
+.checks span::before{content:"✗ ";color:var(--muted)}
+.checks span.ok::before{content:"✓ ";color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:500;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+.tw{overflow-x:auto}
+svg.cv{width:100%;height:140px;display:block;margin-top:8px}
+.cap{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+tr.go{cursor:pointer} tr.go:hover td{background:var(--surface2)}
+.code{display:flex;gap:8px;align-items:center;margin-top:8px}
+.code input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);font-family:"IBM Plex Mono",monospace;font-size:12px}
+.btn{border:1px solid var(--line);background:var(--surface2);border-radius:8px;padding:6px 12px;cursor:pointer;min-height:36px}
+details summary{cursor:pointer;font-size:13px;color:var(--muted);min-height:32px;display:flex;align-items:center}
+#rank td:first-child{min-width:9.5em}
+#rank th.so{cursor:pointer;user-select:none}
+#rank th.so:hover{color:var(--text)}
+#rank th.on{color:var(--accent)}
+#rank th:first-child,#rank td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
+#rank tr.go:hover td:first-child{background:var(--surface2)}
+@media (max-width:620px){ #rank table{font-size:12px} #rank th,#rank td{padding:4px 4px} #rank td:first-child{min-width:7.5em} #rank .tag{font-size:11px;padding:1px 5px} }
+svg.cv .ln{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke}
+.cvlg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.cvlg i{display:inline-block;width:14px;height:0;border-top:2px solid;margin-right:4px;vertical-align:3px}
+.rkc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+dl.vd{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:13px;margin:10px 0 0}
+dl.vd dd{margin:0;color:var(--muted)}
+@media (max-width:620px){ .kpi{grid-template-columns:repeat(2,minmax(0,1fr))} .ctl{grid-template-columns:minmax(0,1fr)} .hm{display:none} }
+
+.wl td a{text-decoration:none}
+.why{display:inline-block;font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:0 6px;margin:1px 2px;color:var(--muted);white-space:nowrap}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>今日名單</h1>
+  <a href="./">← 三線點位</a>
+  <a href="chips.html">籌碼看板</a>
+  <a href="bt.html">回測工具</a>
+  <span class="note" id="meta"></span>
+</header>
+<main class="wrap">
+  <section class="card">
+    <div class="head"><b>強勢＋營收創 12 個月新高</b><span class="tag w">探索・未驗證</span></div>
+    <p class="note" style="margin-top:6px">條件：今天「上軌外開（上通斜率 ≥ 3%）」或「漲 ≥ 9.5%（一價到底的不算）」，而且最近一期月營收創 12 個月新高、年增 &gt; 0；成交金額 ≥ 1 億。</p>
+    <p class="note" style="margin-top:6px">2021-02～2025-08 回測（探索，從很多組合裡挑出來的）：隔天開盤買、抱 5 天，平均比大盤多 +1.38%（t 4.3），扣成本每筆 +0.79%；同樣強勢但營收衰退的沒有優勢。<b>已事先登記，用 2026-10-30 起的新資料判定（2027 年 5 月）；在那之前不是買進建議。</b>隔天開盤直接追強勢股本身是小賠的，這裡的好處要抱幾天才出現。</p>
+  </section>
+  <section class="card">
+    <div class="head"><b id="ttl">名單</b><span class="note" id="sub"></span></div>
+    <div class="tw" id="list" style="margin-top:8px"><p class="note">載入中…</p></div>
+  </section>
+</main>
+<script>
+(function(){
+'use strict';
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function iso(d){ return d&&d.length===8?d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6):''; }
+fetch('data/watch.json?t='+Date.now(),{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }).then(function(j){
+  document.getElementById('meta').textContent='資料日 '+iso(j.date)+'｜營收旗標可用日 '+iso(j.rev_usable_from);
+  var L=j.list||[];
+  document.getElementById('sub').textContent=L.length+' 檔';
+  if(!L.length){ document.getElementById('list').innerHTML='<div class="note">今天沒有符合的股票。</div>'; return; }
+  document.getElementById('list').innerHTML='<table class="mono wl"><thead><tr><th>股票</th><th>收盤</th><th>漲跌</th><th>成交（億）</th><th>強勢</th></tr></thead><tbody>'+
+    L.map(function(x){ return '<tr><td style="font-family:inherit"><a href="chips.html#'+esc(x.code)+'">'+esc(x.code)+' '+esc(x.name)+'</a></td><td>'+x.close+'</td><td class="'+(x.chg>=0?'p':'n')+'">'+(x.chg>=0?'+':'')+x.chg.toFixed(2)+'%</td><td>'+x.val.toFixed(1)+'</td><td style="font-family:inherit">'+x.why.map(function(w){return '<span class="why">'+esc(w)+'</span>';}).join('')+'</td></tr>'; }).join('')+'</tbody></table>';
+}).catch(function(){ document.getElementById('list').innerHTML='<div class="note">名單還沒產生（每月 11 日營收旗標更新、每天收盤後產生名單）。</div>'; });
+})();
+</script>
+</body>
+</html>

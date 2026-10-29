@@ -32,6 +32,11 @@ import numpy as np
 import backtest as B
 
 COST = B.COST_OVERNIGHT
+
+
+def cost_h(h):
+    """抱 1 天＝隔天開盤進、當天收盤出，是當沖，用當沖成本（10-29 更正：之前 1 天也用隔夜成本，淨被低估 0.15 點）。"""
+    return B.COST_DAY if h == 1 else B.COST_OVERNIGHT
 HS = B.HORIZONS                      # [1, 5, 10, 20]
 SPLIT = "20250901"                   # 之前＝樣本外（多數門檻用近一年挑的）；之後＝近一年
 MIN_TRADES, MIN_DAYS = 100, 30
@@ -301,8 +306,8 @@ def main():
                 hres[side] = dict(
                     n=int(len(r)), nd=int(len(idx)),
                     ex=_r(ex.mean()), t=_r(nw_t(ex, h)),
-                    net=_r(dret.mean() - COST),
-                    net_d=_r(s * dmean_raw[idx].mean() - COST),
+                    net=_r(dret.mean() - cost_h(h)),
+                    net_d=_r(s * dmean_raw[idx].mean() - cost_h(h)),
                     win=round(float(len(wins) / len(dret) * 100), 1),
                     aw=_r(aw), al=_r(al), pay=_r(aw / -al if (aw is not None and al) else None),
                     mdd=round(mdd, 1),
@@ -322,7 +327,7 @@ def main():
             n_combo += 1
 
     lucky = round(tested * 0.0455)
-    meta = dict(days=nD, start=days[0], end=days[-1], split=SPLIT, cost=COST,
+    meta = dict(days=nD, start=days[0], end=days[-1], split=SPLIT, cost=COST, cost_day=B.COST_DAY,
                 adjusted=B.ADJUST, min_trades=MIN_TRADES, version=2, horizons=HS, step=STEP,
                 conditions=[list(c) for c in conds],
                 groups={"XL": "小哥情境·做多", "XS": "小哥情境·做空", "L": "偏多", "S": "偏空", "N": "中性／狀態"},
@@ -336,7 +341,7 @@ def main():
         with open(os.path.join(here, "data", "bt_explore_h%d%s.json" % (h, sfx)), "w", encoding="utf-8") as fh:
             json.dump(dict(h=h, combos=out[h]), fh, ensure_ascii=False, separators=(",", ":"))
         with open(os.path.join(here, "data", "bt_explore_curve_%d%s.json" % (h, sfx)), "w", encoding="utf-8") as fh:
-            json.dump(dict(start=days[0], end=days[-1], step=STEP, cost=COST, dates=[days[i] for i in pts_idx],
+            json.dump(dict(start=days[0], end=days[-1], step=STEP, cost=cost_h(h), dates=[days[i] for i in pts_idx],
                            curves=curves[h]["ex"], raw=curves[h]["raw"], cnt=curves[h]["cnt"]), fh,
                       separators=(",", ":"))
     print("bt_explore：%d 個條件、%d 組有結果、試過 %d 格、運氣預期 %d 格" % (nC, n_combo, tested, lucky))

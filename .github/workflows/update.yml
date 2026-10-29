@@ -90,6 +90,11 @@ jobs:
         continue-on-error: true
         run: python smc.py --site 120
 
+      # 2026-10-29：強勢＋營收創新高名單（事先登記前瞻 A，網站標探索未驗證）
+      - name: 今日名單
+        continue-on-error: true
+        run: python watch.py
+
       # 2026-10-28：官方最新一季綜合損益表（政府資料開放授權，可公開）→ data/fin.json
       - name: 財報（最新一季）
         continue-on-error: true

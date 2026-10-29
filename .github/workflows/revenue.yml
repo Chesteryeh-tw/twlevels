@@ -178,6 +178,7 @@ jobs:
         run: |
           python revenue_fetch.py --panel-only
           python factor_revenue.py
+          python rev_flags.py
 
       # 只 commit 報告。絕對不要改成 git add data/ —— 營收原始檔和 FinMind 股價都不能進 repo。
       - name: 推回報告
@@ -186,6 +187,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f revenue_report.md revenue_report.json
+          [ -f data/rev_flags.json ] && git add -f data/rev_flags.json
           [ -d data/revenue_snapshots_meta ] && git add -f data/revenue_snapshots_meta
           if git diff --cached --quiet; then
             echo "沒有變動"
