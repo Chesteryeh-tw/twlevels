@@ -1,4 +1,4 @@
-TWLVC1|20261029|202610292254|1915|code,fgn,fgnD,inv,invD,dlrH,mgn,mgnChg,shrt,sr,big,bigChg,small,smallChg,holders,holdersChg,mgnRate,mgnCost,mgnConf
+TWLVC1|20261029|202610300325|1915|code,fgn,fgnD,inv,invD,dlrH,mgn,mgnChg,shrt,sr,big,bigChg,small,smallChg,holders,holdersChg,mgnRate,mgnCost,mgnConf
 0050,-43090.275,-15,3300,10,-9127.552,,,,,23.07,0.97,66.33,-0.80,3720414,42518,,,
 0051,-0.998,-1,0,0,-15.486,,,,,0.00,0.00,80.63,0.24,12546,53,,,
 0052,-3184.478,-6,0,0,-2595.183,,,,,17.17,1.02,73.61,-1.20,471105,3458,,,
