@@ -251,9 +251,15 @@ def main():
     end = datetime.now().strftime("%Y-%m-%d")
     token = read_token()
     limit = None
+    extra = None
     for a in sys.argv[1:]:
         if a.startswith("--limit="):
             limit = int(a.split("=", 1)[1])
+        # 2026-10-29：驗證專用的舊資料（2016～2020）。--end 指定結束日；--codes 額外加代號清單（下市櫃股票）
+        if a.startswith("--end="):
+            end = a.split("=", 1)[1]
+        if a.startswith("--codes="):
+            extra = a.split("=", 1)[1]
 
     info = {}
     path = os.path.join(T.DATA, "market.txt")
@@ -263,6 +269,11 @@ def main():
             p = line.rstrip("\n").split(",")
             if len(p) >= 3 and p[0]:
                 info[p[0]] = p[1]
+    if extra and os.path.exists(extra):
+        for line in open(extra, encoding="utf-8"):
+            c = line.strip().split(",")[0]
+            if c and c[0].isalnum() and c not in info and not c.startswith("#") and c != "code":
+                info[c] = c
     codes = sorted(info)
     if limit:
         codes = codes[:limit]

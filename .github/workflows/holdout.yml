@@ -1,0 +1,90 @@
+name: 驗證專用舊資料（2016～2020）
+
+# 2026-10-29 使用者同意補 2016～2020 當「沒看過的資料」，專門拿來驗證新發現（平常探索只用 2021 以後）。
+# 這條管線的資料放自己的快取（holdout-*），不跟 2021 起的主資料混。原始資料不進 repo。
+# 分步跑：prices（FinMind 日線，約 4～5 小時）→ chips → revenue → daytrade → backtest。
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "prices／daytrade（其他步驟之後加）"
+        default: "prices"
+      limit:
+        description: "最多幾檔（測試填 3；0＝全部）"
+        default: "0"
+
+permissions:
+  contents: read
+
+# 跟 finmind.yml 共用 FinMind 流量
+concurrency:
+  group: finmind-api
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # repo 裡的 data/stock 是 2025-08 以後的，先移開，避免跟舊資料接在一起
+      - name: 清掉 repo 的近期日線
+        if: inputs.step == 'prices'
+        run: rm -rf data/stock && mkdir -p data/stock
+
+      - name: 還原舊資料日線
+        if: inputs.step == 'prices'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: holdout-hist-
+          restore-keys: |
+            holdout-hist-
+
+      # 從 2015-06 抓（年線、營收 12 個月新高要暖機），到 2020-12-31；下市櫃清單（GPT 提供）放 data/holdout_delisted.csv
+      - name: 抓舊資料日線
+        if: inputs.step == 'prices'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          L="${{ inputs.limit }}"; ARG=""; [ "$L" != "0" ] && ARG="--limit=$L"
+          python finmind_backfill.py 2015-06-01 --end=2020-12-31 --codes=data/holdout_delisted.csv $ARG
+          n=$(ls data/stock/*.txt 2>/dev/null | wc -l); echo "::notice title=舊資料日線::$n 檔"
+
+      - name: 存舊資料日線
+        if: always() && inputs.step == 'prices'
+        uses: actions/cache/save@v4
+        with:
+          path: data/stock
+          key: holdout-hist-${{ github.run_id }}
+
+      # 當沖（證交所＋櫃買）2016～2020：跟主資料共用 daytrade 快取（日期不重疊）
+      - name: 還原日線（取交易日）
+        if: inputs.step == 'daytrade'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: holdout-hist-
+          restore-keys: |
+            holdout-hist-
+      - name: 還原當沖快取
+        if: inputs.step == 'daytrade'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/daytrade
+          key: daytrade-
+          restore-keys: |
+            daytrade-
+      - name: 抓當沖 2016～2020
+        if: inputs.step == 'daytrade'
+        run: python daytrade_fetch.py --start 20160101 --limit "${{ inputs.limit }}"
+      - name: 存當沖快取
+        if: always() && inputs.step == 'daytrade'
+        uses: actions/cache/save@v4
+        with:
+          path: data/daytrade
+          key: daytrade-${{ github.run_id }}
