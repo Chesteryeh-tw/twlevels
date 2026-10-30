@@ -1655,7 +1655,8 @@
 "20261022",
 "20261027",
 "20261028",
-"20261029"
+"20261029",
+"20261030"
 ],
 "holidays": [
 "20260101",
@@ -1790,14 +1791,14 @@
 "FMTQIK_202607.json.gz": "988f05a25e28f70d0b048ee1114d4b787813dc6ef2a132b36505bdc792c7ae10",
 "FMTQIK_202608.json.gz": "824c3225784653e2d10a1e979064a0baf8f2a61c45fa4eddc10e7fd607d24b55",
 "FMTQIK_202609.json.gz": "dc712c7f16a9d732d9d4e21606e8927cd4d78039505c3256d697a005b17394d5",
-"FMTQIK_202610.json.gz": "3d787dec0ac06d84e6f537cba5cddb130c829194221ee051ae918381e44ca16b",
+"FMTQIK_202610.json.gz": "23c2920bfdb3f891c6d5aed655262b5ea6d9c289752a7b0e2a434ac8d272bab9",
 "holidaySchedule": "7644c1a8af784c09f54670fd7413f536b13eb76c54d658058e8873d1aee32117",
 "market_closures": "a278f9830496b143fbffda61316cee74d4412c1bde8bbaeda28da7a3da3576d6"
 },
-"built_at": "2026-10-29T20:15:39Z",
+"built_at": "2026-10-30T19:55:10Z",
 "sources_verified_at": {
-"FMTQIK_current": "2026-10-29T20:15:32Z",
-"holidaySchedule": "2026-10-29T20:15:39Z"
+"FMTQIK_current": "2026-10-30T19:55:04Z",
+"holidaySchedule": "2026-10-30T19:55:10Z"
 },
 "note": "built_at 只是重建時間；新鮮度看 sources_verified_at（必要來源最後一次成功抓到的時間）"
 }
