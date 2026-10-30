@@ -1174,9 +1174,12 @@ function renderSide(){
 }
 function tagOf(name){
   var c=S.cls[name]; if(!c) return '<span class="mu" title="分類表沒有這個分點">—</span>';
-  if(c.classification_status!=='confirmed') return '<span class="mu" title="尚未分類">—</span>';
-  var t={'外資':'外','官股':'官','本土':'本'}[c.class]||'';
-  return t?'<span class="badge">'+t+'</span>':'—';
+  // 10-30：GPT 分類表 class＝gov／fgn／local_head／local_branch（舊版用中文）；candidate＝候選，淡色標示
+  var t={'外資':'外','官股':'官','本土':'本','gov':'官','fgn':'外','local_head':'本','local_branch':'本'}[c.class]||'';
+  if(!t) return '<span class="mu" title="尚未分類">—</span>';
+  if(c.classification_status==='confirmed') return '<span class="badge">'+t+'</span>';
+  if(c.classification_status==='candidate') return '<span class="badge" style="opacity:.55;border-style:dashed" title="候選分類（未逐家確認歷史所有權），不納入正式加總">'+t+'?</span>';
+  return '<span class="mu" title="尚未分類">—</span>';
 }
 // 占量期間：當天／N 日（到選的那天為止）或自訂起訖（使用者 10-28）
 function occRange(iD){
@@ -1200,7 +1203,7 @@ function renderBrokers(){
   }
   var close=(S.px[idxOf(d)]||{}).c;
   var list=rows.filter(function(r){return r.side===S.side;}).sort(function(a,b){return (+a.rank)-(+b.rank);});
-  var anyCls=Object.keys(S.cls).some(function(k){ return S.cls[k].classification_status==='confirmed'; });
+  var anyCls=Object.keys(S.cls).some(function(k){ var st=S.cls[k].classification_status; return st==='confirmed'||st==='candidate'; });
   var iD=idxOf(d), sgn=S.side==='buy'?1:-1, OR=occRange(iD), N=OR.n, oEnd=OR.end, oLab=OR.lab;
   var h=['<div class="tw"><table class="bk mono"><thead><tr><th>分點</th>'+(anyCls?'<th>類</th>':'')+'<th>'+(S.side==='buy'?'買超':'賣超')+'</th>'+
     '<th title="同方向、每天都上榜的連續天數；≥ 表示再往前沒有分點資料">連續</th><th title="'+esc(oLab)+'這個分點淨買賣 ÷ 同期成交量（只加總上榜日）">'+esc(oLab)+'占量</th>'+
