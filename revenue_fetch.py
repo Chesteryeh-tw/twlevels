@@ -25,6 +25,10 @@ RAW = os.path.join("data", "revenue_raw")
 OUT = os.path.join("data", "revenue")
 MANIFEST = os.path.join(RAW, "manifest.json")
 START = (2020, 1)
+# 2026-10-29：驗證專用舊資料（holdout.yml）用環境變數 REV_START=YYYY-MM 往前抓；平常（含 SUS）不設，維持 2020-01
+if os.environ.get("REV_START"):
+    _y, _m = os.environ["REV_START"].split("-")
+    START = (int(_y), int(_m))
 PAUSE = 3          # 每次請求之間停幾秒（官方沒公布上限，保守一點）
 RETRY_WAIT = (10, 30, 60)
 MIN_ROWS = {"sii": 800, "otc": 600}

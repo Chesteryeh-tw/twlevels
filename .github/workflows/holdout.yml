@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: "prices／daytrade（其他步驟之後加）"
+        description: "prices／chips／revenue／daytrade"
         default: "prices"
       limit:
         description: "最多幾檔（測試填 3；0＝全部）"
@@ -88,3 +88,46 @@ jobs:
         with:
           path: data/daytrade
           key: daytrade-${{ github.run_id }}
+
+      # 三大法人、融資券 2015-06～2020-12（FinMind，約 7.6 小時，一趟最多 320 分，要跑兩趟；第二趟接著抓）
+      - name: 還原舊資料籌碼
+        if: inputs.step == 'chips'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/chip_fm
+          key: holdout-chips-
+          restore-keys: |
+            holdout-chips-
+      - name: 抓舊資料籌碼
+        if: inputs.step == 'chips'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python finmind_chips.py 2015-06-01 --end=2020-12-31 --max-minutes=320
+      - name: 存舊資料籌碼
+        if: always() && inputs.step == 'chips'
+        uses: actions/cache/save@v4
+        with:
+          path: data/chip_fm
+          key: holdout-chips-${{ github.run_id }}
+
+      # 月營收 2015-01 起（公開資訊觀測站，跟主資料同一支程式；先接主資料的 2020 以後，另存一份）
+      - name: 還原月營收（舊資料）
+        if: inputs.step == 'revenue'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: holdout-rev-
+          restore-keys: |
+            holdout-rev-
+            revenue-raw-
+      - name: 抓月營收 2015 起
+        if: inputs.step == 'revenue'
+        env:
+          REV_START: "2015-01"
+        run: python revenue_fetch.py
+      - name: 存月營收（舊資料）
+        if: always() && inputs.step == 'revenue'
+        uses: actions/cache/save@v4
+        with:
+          path: data/revenue_raw
+          key: holdout-rev-${{ github.run_id }}

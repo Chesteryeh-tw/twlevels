@@ -53,6 +53,7 @@ PAUSE = 7.0
 RATE_WAIT = 90
 MAX_FAILS = 10
 DEFAULT_START = "2021-01-01"
+END_OVERRIDE = next((x.split("=", 1)[1] for x in sys.argv[1:] if x.startswith("--end=")), None)   # 10-29 驗證舊資料用
 DEFAULT_MAX_MIN = 320          # finmind_chips.yml 的 timeout 是 350 分，留 30 分存快取
 
 FM_DIR = os.path.join(T.DATA, "chip_fm")
@@ -346,7 +347,7 @@ def selftest():
 def run(start, max_min, only):
     t0 = time.time()
     token = read_token()
-    end = datetime.now().strftime("%Y-%m-%d")
+    end = END_OVERRIDE or datetime.now().strftime("%Y-%m-%d")
     print("先對帳（決定單位）...")
     units = calibrate(token, codes=TEST_CODES[:2] + TEST_CODES[2:3], verbose=False)
     if not units:
