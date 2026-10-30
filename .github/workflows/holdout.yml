@@ -7,14 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: "prices／chips／revenue／daytrade"
+        description: "universe／prices／chips／revenue／daytrade"
         default: "prices"
       limit:
         description: "最多幾檔（測試填 3；0＝全部）"
         default: "0"
 
 permissions:
-  contents: read
+  contents: write
 
 # 跟 finmind.yml 共用 FinMind 流量
 concurrency:
@@ -131,3 +131,32 @@ jobs:
         with:
           path: data/revenue_raw
           key: holdout-rev-${{ github.run_id }}
+
+      # 2016～2020 每月快照找下市櫃股（存活偏誤）→ data/holdout_delisted.csv（只有代號名稱，進 repo）
+      - name: 舊資料母體快照
+        if: inputs.step == 'universe'
+        run: python holdout_universe.py
+      - name: 推回下市櫃清單
+        if: inputs.step == 'universe'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/holdout_delisted.csv
+          if git diff --cached --quiet; then echo "沒有變動"; else
+            git commit -m "2016～2020 下市櫃候選清單（月快照）"
+            git pull --rebase --autostash && git push
+          fi
+
+      # 舊月營收抽核用：六份原始檔＋manifest 放下載區 14 天（給 GPT 核對；不進 repo）
+      - name: 舊月營收抽核檔
+        if: always() && inputs.step == 'revenue'
+        uses: actions/upload-artifact@v4
+        with:
+          name: holdout-revenue-audit
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            data/revenue_raw/manifest.json
+            data/revenue_raw/*/201501*
+            data/revenue_raw/*/201706*
+            data/revenue_raw/*/201912*
