@@ -286,7 +286,7 @@ table.rt th:first-child,table.rt td:first-child{text-align:left}
         <button class="btn" id="impBtn2">選擇檔案</button>
         <button class="btn" id="clrBtn">清除</button>
       </div>
-      <div class="note">選 GPT 整理的 <code>branch_clean_*.csv</code>、<code>broker_class.csv</code>、<code>stock_status_*.csv</code>，可一次多選。<code>mainprofit</code> 是事後補抓的損益排行，會讀取但不用在任何計算。</div>
+      <div class="note">把 GPT 整理包解壓縮後，資料夾裡的 CSV 可以全選：看板讀 <code>branch_clean_*</code>、<code>broker_class</code>、<code>stock_status_*</code>，其他（<code>mainprofit</code> 損益排行、<code>branch_row_qc</code> 品質紀錄）自動略過。同一天重新匯入會整天取代。</div>
     </section>
   </aside>
 </main>
@@ -378,15 +378,21 @@ function idbMerge(byCode, stByCode, seen){ return idb().then(function(d){ return
         os.put(rec,c);
       };
     });
-    tx.oncomplete=function(){res(true);}; tx.onerror=function(){res(false);}; tx.onabort=function(){res(false);};
-  }catch(e){ res(false); }
+    tx.oncomplete=function(){res(true);};
+    tx.onerror=function(){ res((tx.error&&tx.error.name)||'error'); };
+    tx.onabort=function(){ res((tx.error&&tx.error.name)||'abort'); };
+  }catch(e){ res(e&&e.name||'error'); }
 });});}
 function idbClear(){ return idb().then(function(d){ return new Promise(function(res){
   if(!d) return res(false);
   try{ var tx=d.transaction(['kv','stk'],'readwrite'); tx.objectStore('kv').clear(); tx.objectStore('stk').clear(); tx.oncomplete=function(){res(true);}; }catch(e){ res(false); }
 });});}
+// 10-30：列改存成陣列省空間（[side,rank,broker,buy,sell,net,avg,history_mode,broker_class]），讀出來還原成物件
+var KEEP=['side','rank','broker','buy_lots','sell_lots','net_lots','avg_price','history_mode','broker_class'];
+function unpack(r){ if(!Array.isArray(r)) return r; var o={}; for(var i=0;i<KEEP.length;i++) o[KEEP[i]]=r[i]; return o; }
 function loadBk(code){ return idbGet(code,'stk').then(function(rec){
-  S.bk={}; S.status={}; if(rec){ S.bk[code]=rec.bk||{}; S.status[code]=rec.st||{}; } }); }
+  S.bk={}; S.status={};
+  if(rec){ var bk={}; Object.keys(rec.bk||{}).forEach(function(d){ bk[d]=rec.bk[d].map(unpack); }); S.bk[code]=bk; S.status[code]=rec.st||{}; } }); }
 
 /* ---------- CSV ---------- */
 function parseCSV(text){
@@ -1317,13 +1323,16 @@ function impStat(){
     (S.mpRows?'；損益排行 '+S.mpRows+' 列（不用於計算）':'') : '尚未匯入。';
 }
 var NA='<span class="mu" title="來源空白，不是 0">未取得</span>';
-var KEEP=['side','rank','broker','buy_lots','sell_lots','net_lots','avg_price','history_mode','broker_class'];
 function onFiles(files){
   files=Array.prototype.slice.call(files).sort(function(a,b){ return a.name<b.name?-1:1; });
+  // 10-30：GPT 整理包裡看板用不到的檔，不讀內容直接略過（mainprofit 一包 1.7 GB，讀進來會卡住）
+  var ignored=[];
+  files=files.filter(function(f){ if(/^(mainprofit|branch_row_qc|quality_issues|meta_)/i.test(f.name)){ ignored.push(f.name); return false; } return true; });
   var nB=0, nC=0, nS=0, bad=[], skip=[], seen={}, sum=S.sum||{codes:0,dates:[],rows:0,codeList:[]};
   var codeSet={}; (sum.codeList||[]).forEach(function(c){ codeSet[c]=1; });
   var dateSet={}; (sum.dates||[]).forEach(function(d){ dateSet[d]=1; });
-  var impRows={}, ok=true, k=0;
+  var impRows={}, ok=true, k=0, PB={}, PS={}, pend=0, errs=[];
+  var STK=['branch_status_qc','branch_missing_reason','branch_history_mode','buy_count','sell_count','raw_volume_lots','branch_numeric_blank_fields'];
   function step(){
     if(k>=files.length) return finish();
     var f=files[k++];
@@ -1332,28 +1341,35 @@ function onFiles(files){
       var rows; try{ rows=parseCSV(t); }catch(e){ bad.push(f.name); return null; }
       t=null;
       if(!rows.length){ skip.push(f.name); return null; }
-      var h=rows[0], byCode={}, stBy={};
+      var h=rows[0], byCode=PB, stBy=PS;
       if('side' in h && 'net_lots' in h && 'broker' in h){
         rows.forEach(function(r){
           var c=r.stock_code, d=(r.trade_date||'').replace(/-/g,''); if(!c||d.length!==8) return;
-          var o={}; KEEP.forEach(function(x){ o[x]=r[x]; });
-          ((byCode[c]=byCode[c]||{})[d]=byCode[c][d]||[]).push(o);
+          var o=KEEP.map(function(x){ return r[x]; });
+          ((byCode[c]=byCode[c]||{})[d]=byCode[c][d]||[]).push(o); pend++;
           if(!codeSet[c]){ codeSet[c]=1; } dateSet[d]=1;
           impRows[d]=(impRows[d]||0)+1; nB++;
         });
       } else if('classification_status' in h && 'broker' in h){
         rows.forEach(function(r){ S.cls[r.broker]=r; nC++; });
       } else if('branch_status_qc' in h){
-        rows.forEach(function(r){ var d=(r.trade_date||'').replace(/-/g,''); if(!r.stock_code||d.length!==8) return; (stBy[r.stock_code]=stBy[r.stock_code]||{})[d]=r; nS++; });
+        rows.forEach(function(r){ var d=(r.trade_date||'').replace(/-/g,''); if(!r.stock_code||d.length!==8) return;
+          var o={}; STK.forEach(function(x){ if(r[x]!==undefined&&r[x]!=='') o[x]=r[x]; });
+          (stBy[r.stock_code]=stBy[r.stock_code]||{})[d]=o; nS++; pend++; });
       } else if('ranking_type' in h){
         S.mpRows+=rows.length;
       } else { bad.push(f.name+'（看不懂的欄位）'); return null; }
       rows=null;
-      if(!Object.keys(byCode).length&&!Object.keys(stBy).length) return null;
-      return idbMerge(byCode,stBy,seen).then(function(r){ if(!r) ok=false; });
+      return flush(false);
     }).then(function(){ setTimeout(step,0); }, function(){ bad.push(f.name); setTimeout(step,0); });
   }
+  function flush(force){
+    if(!pend||(!force&&pend<400000)) return Promise.resolve();
+    var a=PB, b=PS; PB={}; PS={}; pend=0;
+    return idbMerge(a,b,seen).then(function(r){ if(r!==true){ ok=false; if(r) errs.push(r); } });
+  }
   function finish(){
+    if(pend) return flush(true).then(finish);
     // 摘要：每天幾列（同一天重新匯入就取代，不重複加）
     sum.codeList=Object.keys(codeSet); sum.codes=sum.codeList.length; sum.dates=Object.keys(dateSet).sort();
     sum.dayRows=sum.dayRows||{}; Object.keys(impRows).forEach(function(d){ sum.dayRows[d]=impRows[d]; });
@@ -1361,7 +1377,7 @@ function onFiles(files){
     idbPut('meta',{cls:S.cls,mpRows:S.mpRows,sum:sum}).then(function(ok2){
       return loadBk(S.code).then(function(){
         impStat();
-        $('impStat').innerHTML+='<br>這次讀到：分點 '+nB.toLocaleString('en-US')+' 列、分類 '+nC+' 列、狀態 '+nS+' 列'+(skip.length?'；只有表頭、略過（休市日或當天沒資料，不是 0）：'+esc(skip.join('、')):'')+(bad.length?'；<span class="bad">無法讀取：'+esc(bad.join('、'))+'</span>':'')+((ok&&ok2)?'':'；<span class="bad">瀏覽器空間不足或不允許存檔，部分資料沒存到</span>');
+        $('impStat').innerHTML+='<br>這次讀到：分點 '+nB.toLocaleString('en-US')+' 列、分類 '+nC+' 列、狀態 '+nS+' 列'+(skip.length?'；只有表頭、略過（休市日或當天沒資料，不是 0）：'+esc(skip.join('、')):'')+(ignored.length?'；看板用不到、沒讀：'+ignored.length+' 個（損益排行、品質紀錄）':'')+(bad.length?'；<span class="bad">無法讀取：'+esc(bad.join('、'))+'</span>':'')+((ok&&ok2)?'':'；<span class="bad">部分資料沒存到'+(errs.length?'（'+esc(errs[0])+(errs[0]==='QuotaExceededError'?'：瀏覽器空間不足':'')+'）':'')+'</span>');
         var bk=S.bk[S.code];
         if(bk && !bk[S.sel]){ var ds=Object.keys(bk).sort(); if(ds.length) S.sel=ds[ds.length-1]; }
         fillData(); renderSide(); renderTrack(); drawBand(); renderRange();
