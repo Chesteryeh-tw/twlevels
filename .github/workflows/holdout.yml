@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: "universe／prices／chips／revenue／daytrade"
+        description: "universe／prices／chips／revenue／daytrade／backtest"
         default: "prices"
       limit:
         description: "最多幾檔（測試填 3；0＝全部）"
@@ -160,3 +160,66 @@ jobs:
             data/revenue_raw/*/201501*
             data/revenue_raw/*/201706*
             data/revenue_raw/*/201912*
+
+      # 驗證回測（事先登記 preregistration/舊資料2016至2020驗證_事先登記_20261101.md；判定 holdout_judge.py）
+      # 只 commit data/holdout/ 的統計結果；日線、籌碼、營收原始資料只在這趟 job 裡
+      - name: 清掉 repo 的近期日線與籌碼
+        if: inputs.step == 'backtest'
+        run: rm -rf data/stock data/chip && mkdir -p data/stock data/chip
+      - name: 還原舊資料日線（回測）
+        if: inputs.step == 'backtest'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: holdout-hist-
+          restore-keys: |
+            holdout-hist-
+      - name: 還原舊資料籌碼（回測）
+        if: inputs.step == 'backtest'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/chip_fm
+          key: holdout-chips-
+          restore-keys: |
+            holdout-chips-
+      - name: 還原舊月營收（回測）
+        if: inputs.step == 'backtest'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/revenue_raw
+          key: holdout-rev-
+          restore-keys: |
+            holdout-rev-
+      - name: 跑驗證回測
+        if: inputs.step == 'backtest'
+        env:
+          REV_START: "2015-01"
+        run: |
+          pip install -q numpy
+          n=$(ls data/stock/*.txt | wc -l); echo "::notice title=日線::$n 檔"
+          python finmind_chips.py --merge
+          python revenue_fetch.py --panel-only
+          python backtest.py --exits --rally
+          python bt_bopen2.py
+          python factor_revenue.py
+          python holdout_judge.py backtest.json data/bt_bopen2.json revenue_report.json data/bt_series.json data/holdout
+          cp backtest.json data/holdout/backtest_holdout.json
+          cp data/bt_bopen2.json data/holdout/bt_bopen2_holdout.json
+          cp data/bt_series.json data/holdout/bt_series_holdout.json
+          cp revenue_report.json data/holdout/revenue_report_holdout.json
+      - name: 推回驗證結果
+        if: inputs.step == 'backtest'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/holdout/
+          git commit -m "舊資料（2016～2020）驗證結果" && git stash -u -q || true
+          git pull --rebase && git push
+      - name: 驗證結果留存
+        if: always() && inputs.step == 'backtest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: holdout-backtest
+          retention-days: 14
+          if-no-files-found: warn
+          path: data/holdout/
