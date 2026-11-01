@@ -1,0 +1,99 @@
+{
+ "days": 1323,
+ "start": "20150715",
+ "end": "20201203",
+ "cost": 0.235,
+ "cells": {
+  "D|deep|m|hi|S": {
+   "n": 102,
+   "days": 86,
+   "net": -0.103,
+   "net_stop3": -0.091,
+   "win": 47.1,
+   "up3": 11.8,
+   "up5": 3.9,
+   "lu_close": 1.0,
+   "lu_open": 0.0,
+   "p5": -2.17,
+   "worst": -8.39
+  },
+  "D|deep|s|hi|S": {
+   "n": 74,
+   "days": 69,
+   "net": 0.552,
+   "net_stop3": 0.615,
+   "win": 55.4,
+   "up3": 4.1,
+   "up5": 2.7,
+   "lu_close": 0.0,
+   "lu_open": 0.0,
+   "p5": -2.22,
+   "worst": -5.32
+  },
+  "U|deep|l|hi|S": {
+   "n": 1572,
+   "days": 730,
+   "net": 0.091,
+   "net_stop3": 0.063,
+   "win": 58.5,
+   "up3": 25.7,
+   "up5": 12.2,
+   "lu_close": 4.8,
+   "lu_open": 0.5,
+   "p5": -5.8,
+   "worst": -37.13
+  },
+  "U|mid|s|mid|S": {
+   "n": 759,
+   "days": 480,
+   "net": 0.149,
+   "net_stop3": 0.059,
+   "win": 55.5,
+   "up3": 20.0,
+   "up5": 8.2,
+   "lu_close": 2.2,
+   "lu_open": 0.3,
+   "p5": -4.5,
+   "worst": -12.56
+  },
+  "U|shallow|m|mid|S": {
+   "n": 423,
+   "days": 321,
+   "net": 0.225,
+   "net_stop3": -0.081,
+   "win": 54.4,
+   "up3": 30.5,
+   "up5": 12.8,
+   "lu_close": 4.7,
+   "lu_open": 1.4,
+   "p5": -5.12,
+   "worst": -27.33
+  },
+  "U|shallow|s|lo|S": {
+   "n": 478,
+   "days": 329,
+   "net": 0.08,
+   "net_stop3": 0.111,
+   "win": 52.1,
+   "up3": 18.2,
+   "up5": 10.0,
+   "lu_close": 4.4,
+   "lu_open": 0.8,
+   "p5": -5.14,
+   "worst": -15.0
+  },
+  "U|shallow|s|mid|S": {
+   "n": 1133,
+   "days": 624,
+   "net": 0.249,
+   "net_stop3": 0.041,
+   "win": 55.7,
+   "up3": 24.4,
+   "up5": 11.7,
+   "lu_close": 4.4,
+   "lu_open": 0.9,
+   "p5": -4.43,
+   "worst": -13.41
+  }
+ }
+}
