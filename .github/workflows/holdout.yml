@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: "universe／prices／chips／revenue／daytrade／backtest"
+        description: "universe／prices／chips／revenue／daytrade／backtest／risk"
         default: "prices"
       limit:
         description: "最多幾檔（測試填 3；0＝全部）"
@@ -223,3 +223,37 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: data/holdout/
+
+      # 軋空風險補測（2026-11-01）：開布林深度開口 7 格，先跑 2021 起主資料、再跑 2015～2020 舊資料；只描述風險、不改判定
+      - name: 還原主資料日線（風險）
+        if: inputs.step == 'risk'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: finmind-hist-2021-01-01-
+          restore-keys: |
+            finmind-hist-2021-01-01-
+            finmind-hist-
+      - name: 風險補測：主資料
+        if: inputs.step == 'risk'
+        run: |
+          mkdir -p data/holdout
+          python bt_bopen2_risk.py data/holdout/bopen2_risk_main.json
+          rm -rf data/stock && mkdir -p data/stock
+      - name: 還原舊資料日線（風險）
+        if: inputs.step == 'risk'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock
+          key: holdout-hist-
+          restore-keys: |
+            holdout-hist-
+      - name: 風險補測：舊資料並推回
+        if: inputs.step == 'risk'
+        run: |
+          python bt_bopen2_risk.py data/holdout/bopen2_risk_holdout.json
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/holdout/bopen2_risk_main.json data/holdout/bopen2_risk_holdout.json
+          git commit -m "開布林深度開口軋空風險補測" && git stash -u -q || true
+          git pull --rebase && git push
