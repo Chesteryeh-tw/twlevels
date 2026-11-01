@@ -1792,13 +1792,14 @@
 "FMTQIK_202608.json.gz": "824c3225784653e2d10a1e979064a0baf8f2a61c45fa4eddc10e7fd607d24b55",
 "FMTQIK_202609.json.gz": "dc712c7f16a9d732d9d4e21606e8927cd4d78039505c3256d697a005b17394d5",
 "FMTQIK_202610.json.gz": "23c2920bfdb3f891c6d5aed655262b5ea6d9c289752a7b0e2a434ac8d272bab9",
+"FMTQIK_202611.json.gz": "2bc084ac1baf83d0dcbfd05912fa194882fa4364bf03d32dfbf56a0bcd3f9098",
 "holidaySchedule": "7644c1a8af784c09f54670fd7413f536b13eb76c54d658058e8873d1aee32117",
 "market_closures": "a278f9830496b143fbffda61316cee74d4412c1bde8bbaeda28da7a3da3576d6"
 },
-"built_at": "2026-10-31T19:15:32Z",
+"built_at": "2026-11-01T19:36:40Z",
 "sources_verified_at": {
-"FMTQIK_current": "2026-10-31T19:15:26Z",
-"holidaySchedule": "2026-10-31T19:15:32Z"
+"FMTQIK_current": "2026-11-01T19:36:32Z",
+"holidaySchedule": "2026-11-01T19:36:40Z"
 },
 "note": "built_at 只是重建時間；新鮮度看 sources_verified_at（必要來源最後一次成功抓到的時間）"
 }
