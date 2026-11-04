@@ -1,16 +1,16 @@
 {
- "date": "20261103",
- "fetched": "202611040424",
- "count": 1967,
- "listed": 1094,
- "otc": 873,
+ "date": "20261104",
+ "fetched": "202611042354",
+ "count": 1981,
+ "listed": 1100,
+ "otc": 881,
  "history": {
   "first": "20250814",
-  "last": "20261103",
-  "days": 295
+  "last": "20261104",
+  "days": 296
  },
  "marketCols": "code,name,mkt,high,low,close,chg,lot,wan,kshares,open",
  "stockCols": "date,open,high,low,close,lot,wan",
- "tradingDays": 295,
+ "tradingDays": 296,
  "nonTradingDays": 22
 }
