@@ -1,0 +1,13 @@
+{
+ "revenue_month": "202610",
+ "formal": true,
+ "captured_at": "2026-11-11T18:49:51Z",
+ "cutoff_at": "2026-11-11T18:49:52Z",
+ "panel_sha256": "0c567e3f0e08b0b603a3d3a94b8987fe5d746da7de56a90ecbff785503900269",
+ "panel_generation": "20261111T184951Z-0c567e3f0e08",
+ "source": "gen/20261111T184951Z-0c567e3f0e08/panel.csv",
+ "sources_sha256": "f97842aafb3a1ba33faca55661d27f7586092c5df2bbe0e11801835e91c62f47",
+ "sources_count": 164,
+ "snapshot_pit": true,
+ "history_pit_verified": false
+}
