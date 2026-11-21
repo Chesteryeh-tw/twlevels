@@ -1852,10 +1852,10 @@
 "holidaySchedule:holiday_seed.json": "8a78a41df024c9a93079a0478dcbf6a4c8aacef51853a8dc5ca8409b71557561",
 "market_closures": "a278f9830496b143fbffda61316cee74d4412c1bde8bbaeda28da7a3da3576d6"
 },
-"built_at": "2026-11-20T22:14:03Z",
+"built_at": "2026-11-21T20:53:41Z",
 "sources_verified_at": {
-"FMTQIK_current": "2026-11-20T22:13:57Z",
-"holidaySchedule": "2026-11-20T22:14:03Z"
+"FMTQIK_current": "2026-11-21T20:53:36Z",
+"holidaySchedule": "2026-11-21T20:53:40Z"
 },
 "note": "built_at 只是重建時間；新鮮度看 sources_verified_at（必要來源最後一次成功抓到的時間）"
 }
