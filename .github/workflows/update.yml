@@ -73,7 +73,7 @@ jobs:
 
       - name: 外資持股比率（上市）
         continue-on-error: true
-        run: python qfii.py
+        run: python qfii.py 20   # 往回檢查 20 個交易日，缺的才抓（11-05 曾漏抓）
 
       # 籌碼看板用：把每日籌碼檔轉成「每檔一個檔」，一定要排在 chips.py、qfii.py 之後
       - name: 每檔籌碼歷史
